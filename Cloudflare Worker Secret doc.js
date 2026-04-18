@@ -277,8 +277,10 @@ var getCommonFunctions = /* @__PURE__ */ __name(() => `
       root.style.setProperty('--link-color', isDark ? '#58a6ff' : '#0366d6');
       root.style.setProperty('--border-color', isDark ? '#30363d' : '#e1e4e8');
       root.style.setProperty('--code-bg-color', isDark ? '#161b22' : '#f6f8fa');
-      document.getElementById('highlight-theme-light').disabled = isDark;
-      document.getElementById('highlight-theme-dark').disabled = !isDark;
+      const lightTheme = document.getElementById('highlight-theme-light');
+      const darkTheme = document.getElementById('highlight-theme-dark');
+      if (lightTheme) lightTheme.disabled = isDark;
+      if (darkTheme) darkTheme.disabled = !isDark;
     };
 
     const formatRemainingTime = (ms) => {
@@ -787,7 +789,7 @@ var getHomePageContent = /* @__PURE__ */ __name((settings) => `
       <p style="margin: 0; font-size: 16px; color: var(--text-color); opacity: 0.8;">\u8BA9\u4F60\u7684\u79D8\u5BC6\u5728\u2601\uFE0F\u98DE\u4E00\u4F1A \u2708\uFE0F</p>
     </div>
 
-    <div class="form-section" style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
+    <div class="form-section" style="flex: 1 0 auto; display: flex; flex-direction: column; min-height: 0;">
       <div class="form-group" style="margin-bottom: 8px; flex: 1; display: flex; flex-direction: column; min-height: 0;">
         <div class="editor-wrapper" style="position: relative; flex: 1; min-height: 300px;">
           <textarea id="markdownText" class="editor-box" placeholder="\u8BF7\u8F93\u5165\u4F60\u7684\u79D8\u5BC6\uD83D\uDCC4\uFF0C\u652F\u6301 MarkDown \u683C\u5F0F\u3002" maxlength="100000" oninput="updateCharCount()"></textarea>
