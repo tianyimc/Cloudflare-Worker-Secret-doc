@@ -58,6 +58,7 @@ var DEFAULT_SETTINGS = {
   defaultExpiration: 1440,
   defaultAllowViewerDestroy: true,
   attachmentWarnSizeMB: 64,
+  fileMaxSizeMB: 100,
   defaultAttachmentMaxDownloads: -1,
   defaultAttachmentOnePerAccess: false
 };
@@ -78,6 +79,7 @@ async function saveSettings(env, data) {
   if (data.defaultExpiration !== undefined) settings.defaultExpiration = Math.max(1, parseInt(data.defaultExpiration) || 1440);
   if (data.defaultAllowViewerDestroy !== undefined) settings.defaultAllowViewerDestroy = data.defaultAllowViewerDestroy !== false && data.defaultAllowViewerDestroy !== "false";
   if (data.attachmentWarnSizeMB !== undefined) settings.attachmentWarnSizeMB = Math.max(1, parseFloat(data.attachmentWarnSizeMB) || 64);
+  if (data.fileMaxSizeMB !== undefined) settings.fileMaxSizeMB = Math.max(1, parseFloat(data.fileMaxSizeMB) || 100);
   if (data.defaultAttachmentMaxDownloads !== undefined) settings.defaultAttachmentMaxDownloads = parseInt(data.defaultAttachmentMaxDownloads) || -1;
   if (data.defaultAttachmentOnePerAccess !== undefined) settings.defaultAttachmentOnePerAccess = data.defaultAttachmentOnePerAccess === true || data.defaultAttachmentOnePerAccess === "true";
   await env.Worker_Secret_doc.put("settings", JSON.stringify(settings));
@@ -152,8 +154,8 @@ async function verifyRequestSignature(request) {
 }
 __name(verifyRequestSignature, "verifyRequestSignature");
 
-function validateInput(markdown, views, expiration) {
-  if (!markdown || markdown === "") return "\u8BF7\u8F93\u5165\u6587\u6863\u5185\u5BB9";
+function validateInput(markdown, views, expiration, attachmentIds) {
+  if ((!markdown || markdown === "") && (!Array.isArray(attachmentIds) || attachmentIds.length === 0)) return "\u8BF7\u8F93\u5165\u6587\u672C\u5185\u5BB9\u6216\u6DFB\u52A0\u6587\u4EF6";
   if (!views || views === "" || views < 0) return "\u8BF7\u8F93\u5165\u23F3\u6B63\u786E\u7684\u67E5\u770B\u6B21\u6570";
   if (parseInt(views) === 0) return "\u23F3\u67E5\u770B\u6B21\u6570\u4E0D\u80FD\u4E3A0\uFF081=\u9605\u540E\u5373\u711A, \u226510000=\u65E0\u9650\u6B21\uFF09";
   if (!expiration || expiration === "" || expiration < 0) return "\u8BF7\u8F93\u5165\u23F2\uFE0F\u6B63\u786E\u7684\u6709\u6548\u671F";
@@ -504,6 +506,7 @@ var getDocPageFunctions = /* @__PURE__ */ __name((markdown, isError, remainingTi
   `, "getDocPageFunctions");
 var getHomePageFunctions = /* @__PURE__ */ __name((settings) => `
     const ATTACH_WARN_SIZE_MB = ${settings.attachmentWarnSizeMB};
+    const FILE_MAX_SIZE_MB = ${settings.fileMaxSizeMB};
     const DEFAULT_ATTACH_MAX_DOWNLOADS = ${settings.defaultAttachmentMaxDownloads};
 
     let pendingFiles = [];
@@ -577,6 +580,10 @@ var getHomePageFunctions = /* @__PURE__ */ __name((settings) => `
     const handleFileSelect = (event) => {
       const files = event.target.files;
       for (const file of files) {
+        if (file.size > FILE_MAX_SIZE_MB * 1024 * 1024) {
+          alert('\u274C \u6587\u4EF6\u8FC7\u5927\\n\\n\u6587\u4EF6 "' + file.name + '" \u5927\u5C0F\u4E3A ' + formatFileSize(file.size) + '\uFF0C\u8D85\u8FC7\u6700\u5927\u9650\u5236 ' + FILE_MAX_SIZE_MB + ' MB\u3002');
+          continue;
+        }
         if (file.size >= ATTACH_WARN_SIZE_MB * 1024 * 1024) {
           const ok = confirm('\u26A0\uFE0F \u5927\u6587\u4EF6\u63D0\u793A\\n\\n\u6587\u4EF6 "' + file.name + '" \u5927\u5C0F\u4E3A ' + formatFileSize(file.size) + '\uFF0C\u8D85\u8FC7 ' + ATTACH_WARN_SIZE_MB + ' MB\u3002\\n\\n\u8BF7\u6CE8\u610FR2\u989D\u5EA6\u4E0E\u4E0A\u4F20\u4E2D\u65AD\u98CE\u9669\u3002\\n\\n\u662F\u5426\u7EE7\u7EED\u6DFB\u52A0\uFF1F');
           if (!ok) continue;
@@ -612,8 +619,7 @@ var getHomePageFunctions = /* @__PURE__ */ __name((settings) => `
       const allowViewerDestroy = document.getElementById('allowViewerDestroy').value !== 'no';
       const submitButton = document.querySelector('button[onclick="createDocument()"]');
 
-      if (!markdown || markdown.trim() === '') { alert('\u8BF7\u8F93\u5165\u6587\u6863\u5185\u5BB9'); return; }
-
+      if ((!markdown || markdown.trim() === '') && pendingFiles.length === 0) { alert('\u8BF7\u8F93\u5165\u6587\u672C\u5185\u5BB9\u6216\u6DFB\u52A0\u6587\u4EF6'); return; }
       submitButton.disabled = true;
       submitButton.textContent = '\u751F\u6210\u4E2D...';
 
@@ -845,10 +851,10 @@ var getHomePageContent = /* @__PURE__ */ __name((settings) => `
 
       <div id="attachSection" style="margin-top: 8px; flex-shrink: 0;">
         <div style="display: flex; align-items: center; gap: 6px;">
-          <label style="margin: 0; flex-shrink: 0; font-size: 14px; color: var(--text-color); line-height: 38px;">\uD83D\uDCCE \u9644\u4EF6\uFF1A</label>
+          <label style="margin: 0; flex-shrink: 0; font-size: 14px; color: var(--text-color); line-height: 38px;">\uD83D\uDCC1 \u6587\u4EF6\uFF1A</label>
           <input type="file" id="fileInput" style="display:none" multiple>
           <button type="button" id="addFileBtn" onclick="document.getElementById('fileInput').click()" style="background-color: #6c757d; padding: 4px 10px; font-size: 13px; width: auto; height: 32px; margin: 0;">\u9009\u62E9\u6587\u4EF6</button>
-          <small style="font-size: 12px; color: var(--text-color); opacity: 0.7;">\u6700\u5927 100 MB/\u6587\u4EF6</small>
+          <small style="font-size: 12px; color: var(--text-color); opacity: 0.7;">\u6700\u5927 ${settings.fileMaxSizeMB} MB/\u6587\u4EF6</small>
         </div>
         <div id="fileList" style="margin-top: 4px;"></div>
         <div id="attachOptions" style="display:none; margin-top: 6px; flex-wrap: wrap; gap: 8px; align-items: center;">
@@ -908,7 +914,7 @@ var getHomePageContent = /* @__PURE__ */ __name((settings) => `
     <div class="notification" id="notification">\u2705 \u94FE\u63A5\u5DF2\u590D\u5236\u5230\u526A\u8D34\u677F</div>
 
     <div style="margin-top: auto; text-align: center; font-size: 14px; color: var(--text-color); opacity: 0.8; padding-top: 10px; border-top: 1px solid var(--border-color);">
-      <p style="margin: 0;">\u79D8\u5BC6\u6587\u6863 - \u6781\u7B80\u3001\u5F00\u6E90\u7AEF\u5230\u7AEF\u52A0\u5BC6\u7684\u9605\u540E\u5373\u711A\u6587\u6863\u3002 | TIANYIMC<a href="https://github.com/tianyimc/Cloudflare-Worker-Secret-doc" target="_blank" rel="noopener noreferrer" style="color: var(--link-color); text-decoration: none;">\u57FA\u4E8E\u5F00\u6E90\u9879\u76EE</a> | v1.5.1.1 | <a href="/admin" style="color: var(--link-color); text-decoration: none;">\u{1F4CB} \u7BA1\u7406</a></p>
+      <p style="margin: 0;">ZeroSend - \u6781\u7B80\u3001\u5F00\u6E90\u7AEF\u5230\u7AEF\u52A0\u5BC6\u7684\u9605\u540E\u5373\u711A\u6587\u4EF6\u5206\u4EAB\u3002 | &copy; <a href="https://github.com/tianyimc" target="_blank" rel="noopener noreferrer" style="color: var(--link-color); text-decoration: none;">tianyimc.com</a> <a href="https://github.com/tianyimc/ZeroSend" target="_blank" rel="noopener noreferrer" style="color: var(--link-color); text-decoration: none;">\u57FA\u4E8E\u5F00\u6E90\u9879\u76EE</a> | v1.6.0 | <a href="/admin" style="color: var(--link-color); text-decoration: none;">\u{1F4CB} \u7BA1\u7406</a></p>
     </div>
   `, "getHomePageContent");
 function renderHTML(markdown = "", isDocPage = false, remainingViews = 0, isError = false, remainingTime = 0, docId = "", usePasswordEncryption = false, allowViewerDestroy = true, attachmentLinks = [], settings = null) {
@@ -923,8 +929,8 @@ function renderHTML(markdown = "", isDocPage = false, remainingViews = 0, isErro
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>\u79D8\u5BC6\u6587\u6863 - Cloudflare Worker Secret doc</title>
-  <meta name="description" content="\u79D8\u5BC6\u6587\u6863 - \u7AEF\u5230\u7AEF\u52A0\u5BC6\u7684\u9605\u540E\u5373\u711A\u6587\u6863\u3002 | Secret Document - End-to-End Encrypted Self-Destructing Document.">
+  <title>ZeroSend - \u7AEF\u5230\u7AEF\u52A0\u5BC6\u7684\u9605\u540E\u5373\u711A\u6587\u4EF6\u5206\u4EAB</title>
+  <meta name="description" content="ZeroSend - \u6781\u7B80\u3001\u5F00\u6E90\u3001\u7AEF\u5230\u7AEF\u52A0\u5BC6\u7684\u9605\u540E\u5373\u711A\u6587\u4EF6\u5206\u4EAB\u3002 | ZeroSend - Minimalist, open-source, end-to-end encrypted self-destructing file sharing.">
   <meta name="keywords" content="\u9605\u540E\u5373\u711A, \u6587\u672C\u52A0\u5BC6, \u804A\u5929, \u5F00\u6E90, \u5B89\u5168, \u52A0\u5BC6, \u7AEF\u5230\u7AEF, \u5BC6\u6587">
   <link rel="icon" type="image/png" href="data:image/x-icon;base64,AAABAAEAEBAAAAEAIABoBAAAFgAAACgAAAAQAAAAIAAAAAEAIAAAAAAAQAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPa3/ED6m/1NAnP9VQZH/VUOG/1VEff9ITnr1AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADy0/5s+q///P6D//0GV//9Civ//RID//5KCsIL0kE9V/pNHVf6UR1X+lEdV/pNHRv2SRgEAAAAAAAAAAAAAAAA7u/+pPbL//zCR5v8aZ7//PYz3/0OG//+7hoX//ZJI//6USP/+lEj//pRI//6USP/+k0dFAAAAAAAAAAAAAAAAOsL/qTy5//8ZcsD/AEaU/y+C4v9Cjf//uoiG//2TSP/+lEj//pRI//6USP/+lEj//pRHVQAAAAAAAAAAAAAAADnJ/6k7wP//Oa/4/y6R4/8/n/7/QZT//7mNh//8mUv//ppL//6aSv/+mUr//phK//6YSVUAAAAAAAAAAAAAAAA4zf5zOsf//Du8//89sf//Pqb//0qc9f/am23//aFO//6hTv/+oE7//qBN//6fTf/+nk1VAAAAAAAAAAAAAAAAAAAAAFfB4lmKsrT/8JVT/1ep5v/7pVL//alS//6oUf/+qFH//qdR//6mUf/+plD//qVQVQAAAAAAAAAAAAAAAAAAAADHsYBUb7/P/1S55/+jsqT//bBV//6wVf/9r1X//a1U//2sVP/9rFT//axT//2rU1UAAAAAAAAAAAAAAAAAAAAA+bhdU/65Wf/+uFn//rhZ//63Wf/+tlj/+7FX//mrVv/4p1b/96dV//mpVv/6q1VWAAAAAAAAAAAAAAAAAAAAAP7AXVP/wF3//8Bc//+/XP//vlz//btb//mwWf/1p1j/86FX//KfVv/zoFb/9qteVgAAAAAAAAAAAAAAAAAAAAD/x2BT/8dg///GYP//xl///8Vf//y+Xv/4uWn//tyt//7hsf/95K3/++WmxffIhQ0AAAAAAAAAAAAAAAAAAAAA/85jU//OY///zWP//81j///MYv/8xGH/+cR5//3jrv/85qr/++mmxfvopw0AAAAAAAAAAAAAAAAAAAAAAAAAAP/VZlP/1Wb//9Rm///UZv//02b//c1k//nLef/76af/+uyjxfrqow0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/22lR/9xq///baf//2mn//9pp//7XaP/51Xn/+e6gxfntoQ0AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgP8AAIADAACAAwAAgAMAAIADAACAAwAAwAMAAMADAADAAwAAwAMAAMADAADABwAAwA8AAMAfAADAPwAA//8AAA==">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.8.1/github-markdown.min.css">
@@ -1138,7 +1144,7 @@ async function createDocument(request, env) {
     return new Response("", { status: 204, headers: { "Content-Type": "text/plain; charset=UTF-8" } });
   }
   const { markdown, views, expiration, usePasswordEncryption, allowViewerDestroy, attachmentIds } = JSON.parse(requestBody);
-  const errorMessage = validateInput(markdown, views, expiration);
+  const errorMessage = validateInput(markdown, views, expiration, attachmentIds);
   if (errorMessage) {
     return createJSONResponse({ error: errorMessage }, 400);
   }
@@ -1332,8 +1338,8 @@ async function uploadFile(request, env) {
   } catch {
     return createJSONResponse({ error: "\u65E0\u6548\u7684\u5143\u6570\u636E" }, 400);
   }
-  const MAX_SIZE = 100 * 1024 * 1024;
-  if (file.size > MAX_SIZE) return createJSONResponse({ error: "\u6587\u4EF6\u5927\u5C0F\u8D85\u8FC7100MB\u9650\u5236" }, 400);
+  const MAX_SIZE = Math.max(1, (await getSettings(env)).fileMaxSizeMB) * 1024 * 1024;
+  if (file.size > MAX_SIZE) return createJSONResponse({ error: "\u6587\u4EF6\u5927\u5C0F\u8D85\u8FC7\u9650\u5236" }, 400);
   const filename = file.name || "file";
   const contentType = file.type || "application/octet-stream";
   const timestamp = Date.now().toString();
@@ -1414,7 +1420,7 @@ async function getSettingsPageHTML(env) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>\u2699\uFE0F \u8BBE\u7F6E - Secret Doc</title>
+  <title>\u2699\uFE0F \u8BBE\u7F6E - ZeroSend</title>
   <style>
     :root { --bg-color:#fff; --text-color:#24292e; --link-color:#0366d6; --border-color:#e1e4e8; --code-bg-color:#f6f8fa; }
     @media (prefers-color-scheme: dark) { :root { --bg-color:#0d1117; --text-color:#c9d1d9; --link-color:#58a6ff; --border-color:#30363d; --code-bg-color:#161b22; } }
@@ -1467,6 +1473,10 @@ async function getSettingsPageHTML(env) {
       <input type="number" id="attachmentWarnSizeMB" value="${settings.attachmentWarnSizeMB}" min="1" step="0.1">
     </div>
     <div class="form-row">
+      <label>\u6587\u4EF6\u6700\u5927\u5927\u5C0F\uFF08MB\uFF09</label>
+      <input type="number" id="fileMaxSizeMB" value="${settings.fileMaxSizeMB}" min="1" step="1">
+    </div>
+    <div class="form-row">
       <label>\u9644\u4EF6\u9ED8\u8BA4\u6700\u5927\u4E0B\u8F7D\u6B21\u6570</label>
       <input type="number" id="defaultAttachmentMaxDownloads" value="${settings.defaultAttachmentMaxDownloads}" title="-1 \u4E3A\u65E0\u9650\u5236">
     </div>
@@ -1482,7 +1492,7 @@ async function getSettingsPageHTML(env) {
     <div class="section-title">\u5173\u4E8E</div>
     <div class="about-text">
       <p>\u4F5C\u8005\uFF1Atianyimc</p>
-      <p>\u9879\u76EE\u94FE\u63A5\uFF1A<a href="https://github.com/tianyimc/Cloudflare-Worker-Secret-doc" target="_blank" rel="noopener noreferrer">tianyimc/Cloudflare-Worker-Secret-doc</a></p>
+      <p>\u9879\u76EE\u94FE\u63A5\uFF1A<a href="https://github.com/tianyimc/ZeroSend" target="_blank" rel="noopener noreferrer">tianyimc/ZeroSend</a></p>
       <p>\u8054\u7CFB\u90AE\u7BB1\uFF1Acontact@tianyimc.com</p>
       <p>\u611F\u8C22\u539F\u4ED3\u5E93\u4F5C\u8005 fzxx \u7684\u5F00\u6E90\u8D21\u732E\uFF0C\u672C\u9879\u76EE\u57FA\u4E8E\u5176\u5DE5\u4F5C\u8FDB\u884C\u4E8C\u6B21\u5F00\u53D1\u3002</p>
     </div>
@@ -1497,6 +1507,7 @@ async function getSettingsPageHTML(env) {
         defaultExpiration: parseInt(document.getElementById('defaultExpiration').value) || 1440,
         defaultAllowViewerDestroy: document.getElementById('defaultAllowViewerDestroy').value === 'true',
         attachmentWarnSizeMB: parseFloat(document.getElementById('attachmentWarnSizeMB').value) || 64,
+        fileMaxSizeMB: parseFloat(document.getElementById('fileMaxSizeMB').value) || 100,
         defaultAttachmentMaxDownloads: parseInt(document.getElementById('defaultAttachmentMaxDownloads').value) || -1,
         defaultAttachmentOnePerAccess: document.getElementById('defaultAttachmentOnePerAccess').value === 'true'
       };
@@ -1539,7 +1550,7 @@ function getAdminPageHTML(request) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>\u6587\u6863\u7BA1\u7406 - Secret Doc</title>
+  <title>\u6587\u6863\u7BA1\u7406 - ZeroSend</title>
   <link id="highlight-theme-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/github.min.css">
   <link id="highlight-theme-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/github-dark.min.css" disabled>
   <style>
@@ -1759,7 +1770,7 @@ function getAdminPageHTML(request) {
 
   <div class="notification" id="notification"></div>
   <div style="margin-top: 16px; text-align: center; font-size: 14px; color: var(--text-color); opacity: 0.8; padding-top: 10px; border-top: 1px solid var(--border-color);">
-    <p style="margin: 0;">\u79D8\u5BC6\u6587\u6863 - \u6781\u7B80\u3001\u5F00\u6E90\u7AEF\u5230\u7AEF\u52A0\u5BC6\u7684\u9605\u540E\u5373\u711A\u6587\u6863\u3002 | TIANYIMC<a href="https://github.com/tianyimc/Cloudflare-Worker-Secret-doc" target="_blank" rel="noopener noreferrer" style="color: var(--link-color); text-decoration: none;">\u57FA\u4E8E\u5F00\u6E90\u9879\u76EE</a> | v1.5.1.1 | <a href="/settings" style="color: var(--link-color);">\u2699\uFE0F \u8BBE\u7F6E</a></p>
+    <p style="margin: 0;">ZeroSend - \u6781\u7B80\u3001\u5F00\u6E90\u7AEF\u5230\u7AEF\u52A0\u5BC6\u7684\u9605\u540E\u5373\u711A\u6587\u4EF6\u5206\u4EAB\u3002 | &copy; <a href="https://github.com/tianyimc" target="_blank" rel="noopener noreferrer" style="color: var(--link-color); text-decoration: none;">tianyimc.com</a> <a href="https://github.com/tianyimc/ZeroSend" target="_blank" rel="noopener noreferrer" style="color: var(--link-color); text-decoration: none;">\u57FA\u4E8E\u5F00\u6E90\u9879\u76EE</a> | v1.6.0 | <a href="/settings" style="color: var(--link-color);">\u2699\uFE0F \u8BBE\u7F6E</a></p>
   </div>
   <script>
     ${commonFunctions}
@@ -2033,7 +2044,7 @@ async function handleRequest(request, env) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Secret Doc | 阅读端</title>
+  <title>ZeroSend | \u9605\u8BFB\u7AEF</title>
   <link href="https://cdn.bootcdn.net/ajax/libs/twitter-bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
   <style>
     body {
@@ -2108,14 +2119,14 @@ async function handleRequest(request, env) {
 </head>
 <body>
   <div class="top-logo">
-    <span>📄 Secret Doc</span>
+    <span>ZeroSend</span>
   </div>
   <div class="top-links">
     <a href="https://tianyimc.com/" class="btn btn-outline-secondary btn-sm">YIMC</a>
     <a href="https://blog.tianyimc.com/" class="btn btn-outline-secondary btn-sm">Blog</a>
   </div>
   <div class="container">
-    <h2>Secret Doc 阅读端</h2>
+    <h2>ZeroSend \u9605\u8BFB\u7AEF</h2>
     <hr>
     <p><b>此域名为只读端，不提供文档创建功能。</b></p>
     <p>如果你持有一个分享链接，可以直接访问查阅文档内容。<br>如需创建或管理文档，请前往写入端。</p>
