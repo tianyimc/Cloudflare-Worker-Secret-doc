@@ -16,8 +16,14 @@ var Config = {
   // HMAC密钥，用于请求签名验证
   HomePageCacheDuration: 36e5,
   // 首页内存缓存时间（毫秒），1小时 = 3600000
-  BrowserCacheDuration: 86400
+  BrowserCacheDuration: 86400,
   // 浏览器缓存时间（秒），1天 = 86400
+  WriteDomain: "",
+  // 写操作域名（如 "write.yourdomain.com"），留空则不限制域名（仅用于测试）
+  CfTeamDomain: "",
+  // Cloudflare Zero Trust 团队域名（如 "your-team"，对应 your-team.cloudflareaccess.com）
+  CfAccessAudience: ""
+  // Cloudflare Access 应用程序 Audience（AUD）标签，在 Zero Trust 应用中获取
 };
 
 var createResponse = /* @__PURE__ */ __name((body, status = 200, contentType = "text/html; charset=UTF-8", extraHeaders = {}) => new Response(body, {
@@ -982,6 +988,54 @@ async function deleteDocument(docIdWithCrc, env) {
 }
 __name(deleteDocument, "deleteDocument");
 
+var jwksCache = null;
+var jwksCacheTime = 0;
+var JWKS_CACHE_TTL = 10 * 60 * 1e3;
+async function fetchJwks(teamDomain) {
+  const now = Date.now();
+  if (jwksCache && now - jwksCacheTime < JWKS_CACHE_TTL) return jwksCache;
+  const resp = await fetch(`https://${teamDomain}.cloudflareaccess.com/cdn-cgi/access/certs`);
+  if (!resp.ok) return null;
+  jwksCache = await resp.json();
+  jwksCacheTime = now;
+  return jwksCache;
+}
+__name(fetchJwks, "fetchJwks");
+async function verifyCfAccessJwt(request) {
+  const teamDomain = Config.CfTeamDomain;
+  const audience = Config.CfAccessAudience;
+  if (!teamDomain || !audience) return true;
+  const token = request.headers.get("Cf-Access-Jwt-Assertion");
+  if (!token) return false;
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return false;
+    const pad = (s) => s + "=".repeat((4 - s.length % 4) % 4);
+    const header = JSON.parse(atob(pad(parts[0].replace(/-/g, "+").replace(/_/g, "/"))));
+    const payload = JSON.parse(atob(pad(parts[1].replace(/-/g, "+").replace(/_/g, "/"))));
+    const audList = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+    if (!audList.includes(audience)) return false;
+    if (Math.floor(Date.now() / 1e3) > payload.exp) return false;
+    const jwks = await fetchJwks(teamDomain);
+    if (!jwks) return false;
+    const jwk = jwks.keys.find((k) => k.kid === header.kid);
+    if (!jwk) return false;
+    const cryptoKey = await crypto.subtle.importKey(
+      "jwk",
+      jwk,
+      { name: "RSASSA-PKCS1-v1_5", hash: { name: "SHA-256" } },
+      false,
+      ["verify"]
+    );
+    const data = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
+    const sig = new Uint8Array(atob(pad(parts[2].replace(/-/g, "+").replace(/_/g, "/"))).split("").map((c) => c.charCodeAt(0)));
+    return await crypto.subtle.verify("RSASSA-PKCS1-v1_5", cryptoKey, sig, data);
+  } catch {
+    return false;
+  }
+}
+__name(verifyCfAccessJwt, "verifyCfAccessJwt");
+
 var homePageCache = null;
 var homePageCacheTime = 0;
 function getHomePage() {
@@ -997,7 +1051,16 @@ __name(getHomePage, "getHomePage");
 
 async function handleRequest(request, env) {
   const url = new URL(request.url);
-  const { pathname } = url;
+  const { pathname, hostname } = url;
+  const isWriteRequest = request.method === "POST" || (request.method === "GET" && pathname === "/");
+  if (isWriteRequest && Config.WriteDomain) {
+    if (hostname !== Config.WriteDomain) {
+      return createForbiddenResponse();
+    }
+    if (!await verifyCfAccessJwt(request)) {
+      return createForbiddenResponse();
+    }
+  }
   if (request.method === "POST") {
     const requestClone = request.clone();
     if (!await verifyRequestSignature(requestClone)) {

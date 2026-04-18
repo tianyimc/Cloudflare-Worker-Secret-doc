@@ -24,7 +24,56 @@
 5. 阻止恶意访问需要在Cloudflare防火墙设置规则；
 6. 如果想删数据，进入KV按文档ID删除，或者删除整个KV。
 
-## 疑问
+## Cloudflare Zero Trust（写域名保护）
+
+通过 Cloudflare Zero Trust（Access）可以将**写操作域名**（创建 / 删除文档的 `GET /` 和 `POST /submit`、`POST /delete/` 端点）设置为仅限授权用户访问，同时保持**读操作域名**（`GET /s/<id>`）完全公开。
+
+### 工作原理
+
+```
+read.yourdomain.com   →  GET /s/<id>            公开，无需认证
+write.yourdomain.com  →  GET /  POST /submit
+                           POST /delete/         需通过 CF Access 认证
+```
+
+1. **Cloudflare 网络层**：Cloudflare Access 在请求到达 Worker 之前拦截写域名的流量，强制完成身份验证，并在通过验证的请求头中注入 `Cf-Access-Jwt-Assertion`。
+2. **Worker 层（纵深防御）**：Worker 验证写域名的主机名，并使用 Cloudflare 公钥对 JWT 进行签名验证，双重保障。
+
+### 配置步骤
+
+#### 1. 修改 Worker 代码头部的 `Config`
+
+```js
+var Config = {
+  // … 其他配置保持不变 …
+  WriteDomain: "write.yourdomain.com",           // 写域名的主机名
+  CfTeamDomain: "your-team",                     // Zero Trust 团队名（your-team.cloudflareaccess.com）
+  CfAccessAudience: "your-application-aud-tag",  // Access 应用的 Audience 标签
+};
+```
+
+#### 2. 部署 Worker 并绑定两个自定义域名
+
+参考 `wrangler.toml`，将写域名和读域名都路由到同一个 Worker。你也可以在 Cloudflare 控制台 → Workers 和 Pages → 设置 → 域和路由中手动添加。
+
+#### 3. 在 Cloudflare Zero Trust 中创建 Access 应用
+
+1. 进入 **Cloudflare Zero Trust 控制台** → **Access** → **Applications** → **Add an application**；
+2. 选择 **Self-hosted**；
+3. **Application domain** 填写写域名（`write.yourdomain.com`）；
+4. 配置身份验证策略（如仅允许特定邮箱 / 邮箱后缀 / GitHub 组织等）；
+5. 创建完成后，在应用详情页复制 **Application Audience (AUD) Tag**，填入上方 `CfAccessAudience`；
+6. 在应用的 **Overview** 页面确认 **Team domain**，填入 `CfTeamDomain`（仅填团队名，不含 `.cloudflareaccess.com`）。
+
+#### 4. 验证效果
+
+- 访问 `read.yourdomain.com/s/<id>` → 无需登录即可查看文档；
+- 访问 `write.yourdomain.com/` → 跳转至 Cloudflare Access 登录页，认证后才能创建文档；
+- 直接对写域名发起未经 Access 认证的 `POST` 请求 → 返回 `403 Forbidden`。
+
+> **向后兼容**：若 `WriteDomain` 留空，Worker 行为与原版完全相同，方便本地调试或单域名部署。
+
+
 
 #### 带预览链接功能的即时通讯软件、邮件，会导致链接被机器访问而失效，如何解决？
 
