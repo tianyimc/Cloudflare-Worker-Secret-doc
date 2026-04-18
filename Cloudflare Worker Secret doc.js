@@ -709,7 +709,7 @@ var getHomePageContent = /* @__PURE__ */ __name(() => `
     <div class="notification" id="notification">\u2705 \u94FE\u63A5\u5DF2\u590D\u5236\u5230\u526A\u8D34\u677F</div>
 
     <div style="margin-top: auto; text-align: center; font-size: 14px; color: var(--text-color); opacity: 0.8; padding-top: 10px; border-top: 1px solid var(--border-color);">
-      <p style="margin: 0;">\u79D8\u5BC6\u6587\u6863 - \u6781\u7B80\u3001\u5F00\u6E90\u7AEF\u5230\u7AEF\u52A0\u5BC6\u7684\u9605\u540E\u5373\u711A\u6587\u6863\u3002 | <a href="https://github.com/tianyimc/Cloudflare-Worker-Secret-doc" target="_blank" rel="noopener noreferrer" style="color: var(--link-color); text-decoration: none;">\u57FA\u4E8E\u5F00\u6E90\u9879\u76EE</a> | v1.5 | <a href="/admin" style="color: var(--link-color); text-decoration: none;">\u{1F4CB} \u7BA1\u7406</a></p>
+      <p style="margin: 0;">\u79D8\u5BC6\u6587\u6863 - \u6781\u7B80\u3001\u5F00\u6E90\u7AEF\u5230\u7AEF\u52A0\u5BC6\u7684\u9605\u540E\u5373\u711A\u6587\u6863\u3002 | TIANYIMC<a href="https://github.com/tianyimc/Cloudflare-Worker-Secret-doc" target="_blank" rel="noopener noreferrer" style="color: var(--link-color); text-decoration: none;">\u57FA\u4E8E\u5F00\u6E90\u9879\u76EE</a> | v1.5.1.0 | <a href="/admin" style="color: var(--link-color); text-decoration: none;">\u{1F4CB} \u7BA1\u7406</a></p>
     </div>
   `, "getHomePageContent");
 function renderHTML(markdown = "", isDocPage = false, remainingViews = 0, isError = false, remainingTime = 0, docId = "", usePasswordEncryption = false) {
@@ -1186,6 +1186,9 @@ function getAdminPageHTML(request) {
     </div>
   </div>
   <div class="notification" id="notification"></div>
+  <div style="margin-top: 16px; text-align: center; font-size: 14px; color: var(--text-color); opacity: 0.8; padding-top: 10px; border-top: 1px solid var(--border-color);">
+    <p style="margin: 0;">\u79D8\u5BC6\u6587\u6863 - \u6781\u7B80\u3001\u5F00\u6E90\u7AEF\u5230\u7AEF\u52A0\u5BC6\u7684\u9605\u540E\u5373\u711A\u6587\u6863\u3002 | TIANYIMC<a href="https://github.com/tianyimc/Cloudflare-Worker-Secret-doc" target="_blank" rel="noopener noreferrer" style="color: var(--link-color); text-decoration: none;">\u57FA\u4E8E\u5F00\u6E90\u9879\u76EE</a> | v1.5.1.0</p>
+  </div>
   <script>
     ${commonFunctions}
 
