@@ -1010,6 +1010,7 @@ async function listDocuments(request, env) {
             shareUrl: `${origin}/${Config.SharePath}/${docIdWithCrc}`
           });
         } else {
+          // Auto-clean expired or invalid entries encountered during listing
           await env.Worker_Secret_doc.delete(key.name);
         }
       } catch {
