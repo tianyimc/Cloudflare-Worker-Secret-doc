@@ -1055,7 +1055,108 @@ async function handleRequest(request, env) {
   const isWriteRequest = request.method === "POST" || (request.method === "GET" && pathname === "/");
   if (isWriteRequest && Config.WriteDomain) {
     if (hostname !== Config.WriteDomain) {
-      return createForbiddenResponse();
+      return createHTMLResponse(`<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Secret Doc | 阅读端</title>
+  <link href="https://cdn.bootcdn.net/ajax/libs/twitter-bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f0f0f0;
+      color: #333;
+    }
+    .top-logo {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      width: 100vw;
+      height: 56px;
+      z-index: 9999;
+      background: #f8f9fa;
+      box-shadow: 0 2px 8px #ccc;
+      display: flex;
+      align-items: center;
+      padding-left: 32px;
+      padding-right: 32px;
+    }
+    .top-logo span {
+      font-family: Arial, sans-serif;
+      font-size: 1.25rem;
+      color: #333;
+      letter-spacing: 0.5px;
+    }
+    .top-links {
+      position: fixed;
+      top: 0;
+      right: 32px;
+      height: 56px;
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      gap: 0.5em;
+    }
+    .container {
+      text-align: center;
+      padding: 2em;
+      background: #fff;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+      border-radius: 8px;
+      max-width: 500px;
+      width: 100%;
+      margin-top: 80px;
+    }
+    .footer {
+      margin-top: 2em;
+      font-size: 0.9em;
+      color: #666;
+      text-align: center;
+    }
+    a { color: #007bff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    @media (max-width: 600px) {
+      .top-logo, .top-links {
+        padding-left: 10px;
+        padding-right: 10px;
+        height: 48px;
+      }
+      .container { margin-top: 60px !important; padding: 1em; }
+    }
+  </style>
+</head>
+<body>
+  <div class="top-logo">
+    <span>📄 Secret Doc</span>
+  </div>
+  <div class="top-links">
+    <a href="https://tianyimc.com/" class="btn btn-outline-secondary btn-sm">YIMC</a>
+    <a href="https://blog.tianyimc.com/" class="btn btn-outline-secondary btn-sm">Blog</a>
+  </div>
+  <div class="container">
+    <h2>Secret Doc 阅读端</h2>
+    <hr>
+    <p><b>此域名为只读端，不提供文档创建功能。</b></p>
+    <p>如果你持有一个分享链接，可以直接访问查阅文档内容。<br>如需创建或管理文档，请前往写入端。</p>
+    <hr>
+    <span id="jinrishici-sentence">正在加载今日诗词……</span>
+    <script src="https://sdk.jinrishici.com/v2/browser/jinrishici.js" charset="utf-8"></script>
+  </div>
+  <div class="footer">
+    &copy; 2025 tianyimc.com. All rights reserved.
+  </div>
+  <script src="https://cdn.bootcdn.net/ajax/libs/jquery/3.5.1/jquery.slim.min.js"></script>
+  <script src="https://cdn.bootcdn.net/ajax/libs/twitter-bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</body>
+</html>`, 403);
     }
     if (!await verifyCfAccessJwt(request)) {
       return createForbiddenResponse();
