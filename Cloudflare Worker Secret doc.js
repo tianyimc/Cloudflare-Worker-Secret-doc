@@ -53,6 +53,39 @@ var ERROR_MESSAGES = {
   INVALID_DATA: '\u6587\u6863\u6570\u636E\u65E0\u6548\uFF0C<a href="/"><strong>\u8FD4\u56DE\u9996\u9875</strong></a>\u3002'
 };
 
+var DEFAULT_SETTINGS = {
+  defaultViews: 1,
+  defaultExpiration: 1440,
+  defaultAllowViewerDestroy: true,
+  attachmentWarnSizeMB: 64,
+  defaultAttachmentMaxDownloads: -1,
+  defaultAttachmentOnePerAccess: false
+};
+async function getSettings(env) {
+  try {
+    const raw = await env.Worker_Secret_doc.get("settings");
+    if (!raw) return { ...DEFAULT_SETTINGS };
+    const saved = JSON.parse(raw);
+    return { ...DEFAULT_SETTINGS, ...saved };
+  } catch {
+    return { ...DEFAULT_SETTINGS };
+  }
+}
+__name(getSettings, "getSettings");
+async function saveSettings(env, data) {
+  const settings = {};
+  if (data.defaultViews !== undefined) settings.defaultViews = Math.max(1, parseInt(data.defaultViews) || 1);
+  if (data.defaultExpiration !== undefined) settings.defaultExpiration = Math.max(1, parseInt(data.defaultExpiration) || 1440);
+  if (data.defaultAllowViewerDestroy !== undefined) settings.defaultAllowViewerDestroy = data.defaultAllowViewerDestroy !== false && data.defaultAllowViewerDestroy !== "false";
+  if (data.attachmentWarnSizeMB !== undefined) settings.attachmentWarnSizeMB = Math.max(1, parseFloat(data.attachmentWarnSizeMB) || 64);
+  if (data.defaultAttachmentMaxDownloads !== undefined) settings.defaultAttachmentMaxDownloads = parseInt(data.defaultAttachmentMaxDownloads) || -1;
+  if (data.defaultAttachmentOnePerAccess !== undefined) settings.defaultAttachmentOnePerAccess = data.defaultAttachmentOnePerAccess === true || data.defaultAttachmentOnePerAccess === "true";
+  await env.Worker_Secret_doc.put("settings", JSON.stringify(settings));
+  homePageCache = null;
+  homePageCacheTime = 0;
+}
+__name(saveSettings, "saveSettings");
+
 var crc32Table = (() => {
   const table = [];
   for (let i = 0; i < 256; i++) {
@@ -467,7 +500,12 @@ var getDocPageFunctions = /* @__PURE__ */ __name((markdown, isError, remainingTi
     updateRemainingTime();
     const timerInterval = setInterval(updateRemainingTime, 1000);
   `, "getDocPageFunctions");
-var getHomePageFunctions = /* @__PURE__ */ __name(() => `
+var getHomePageFunctions = /* @__PURE__ */ __name((settings) => `
+    const ATTACH_WARN_SIZE_MB = ${settings.attachmentWarnSizeMB};
+    const DEFAULT_ATTACH_MAX_DOWNLOADS = ${settings.defaultAttachmentMaxDownloads};
+
+    let pendingFiles = [];
+
     const showNotification = () => {
       const notification = document.getElementById('notification');
       notification.style.display = 'block';
@@ -493,16 +531,75 @@ var getHomePageFunctions = /* @__PURE__ */ __name(() => `
     const encrypt = async (plaintext, urlkey, password = null, salt = null) => {
       const nonce = generateNonce();
       const compressedData = await compress(plaintext);
-      
+
       const cryptoKey = password && salt
         ? await deriveKey(password, salt)
         : await crypto.subtle.importKey('raw', urlkey, { name: 'AES-GCM' }, false, ['encrypt']);
-      
+
       const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, cryptoKey, compressedData);
       const combined = new Uint8Array(nonce.length + encrypted.byteLength);
       combined.set(nonce, 0);
       combined.set(new Uint8Array(encrypted), nonce.length);
       return btoa(String.fromCharCode(...combined));
+    };
+
+    const formatFileSize = (bytes) => {
+      if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
+      if (bytes >= 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      return bytes + ' B';
+    };
+
+    const renderFileList = () => {
+      const fileList = document.getElementById('fileList');
+      const attachOptions = document.getElementById('attachOptions');
+      if (pendingFiles.length === 0) {
+        fileList.innerHTML = '';
+        if (attachOptions) attachOptions.style.display = 'none';
+        return;
+      }
+      if (attachOptions) attachOptions.style.display = 'flex';
+      fileList.innerHTML = pendingFiles.map(function(item, idx) {
+        return '<div style="display:flex;align-items:center;gap:6px;padding:3px 6px;background-color:var(--code-bg-color);border:1px solid var(--border-color);border-radius:4px;margin-bottom:3px;font-size:13px;">' +
+          '<span style="flex:1;word-break:break-all;">' + item.file.name + '</span>' +
+          '<span style="flex-shrink:0;opacity:0.6;">' + formatFileSize(item.file.size) + '</span>' +
+          '<button type="button" onclick="removePendingFile(' + idx + ')" style="background-color:#dc3545;padding:1px 6px;font-size:12px;width:auto;height:22px;margin:0;">\u2715</button>' +
+          '</div>';
+      }).join('');
+    };
+
+    const removePendingFile = (idx) => {
+      pendingFiles.splice(idx, 1);
+      renderFileList();
+    };
+
+    const handleFileSelect = (event) => {
+      const files = event.target.files;
+      for (const file of files) {
+        if (file.size >= ATTACH_WARN_SIZE_MB * 1024 * 1024) {
+          const ok = confirm('\u26A0\uFE0F \u5927\u6587\u4EF6\u63D0\u793A\\n\\n\u6587\u4EF6 "' + file.name + '" \u5927\u5C0F\u4E3A ' + formatFileSize(file.size) + '\uFF0C\u8D85\u8FC7 ' + ATTACH_WARN_SIZE_MB + ' MB\u3002\\n\\n\u8BF7\u6CE8\u610FR2\u989D\u5EA6\u4E0E\u4E0A\u4F20\u4E2D\u65AD\u98CE\u9669\u3002\\n\\n\u662F\u5426\u7EE7\u7EED\u6DFB\u52A0\uFF1F');
+          if (!ok) continue;
+        }
+        pendingFiles.push({ file: file });
+      }
+      renderFileList();
+      event.target.value = '';
+    };
+
+    document.getElementById('fileInput').addEventListener('change', handleFileSelect);
+
+    const uploadSingleFile = async (item) => {
+      const file = item.file;
+      const requestId = await generateRequestId();
+      const maxDownloads = parseInt(document.getElementById('attachMaxDownloads').value) || -1;
+      const onePerAccess = document.getElementById('attachOnePerAccess').value === 'true';
+      const meta = JSON.stringify({ requestId, maxDownloads, onePerAccess });
+      const token = await generateHmacSignature(meta, HMAC_KEY);
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('_meta', meta);
+      const resp = await fetch('/upload', { method: 'POST', headers: { 'X-Signature': token }, body: formData });
+      if (!resp.ok) throw new Error('\u6587\u4EF6\u4E0A\u4F20\u5931\u8D25: ' + file.name);
+      return await resp.json();
     };
 
     const createDocument = debounce(async () => {
@@ -512,9 +609,9 @@ var getHomePageFunctions = /* @__PURE__ */ __name(() => `
       const password = document.getElementById('password').value;
       const allowViewerDestroy = document.getElementById('allowViewerDestroy').value !== 'no';
       const submitButton = document.querySelector('button[onclick="createDocument()"]');
-      
-      if (!markdown || markdown.trim() === "") { alert('\u8BF7\u8F93\u5165\u6587\u6863\u5185\u5BB9'); return; }
-      
+
+      if (!markdown || markdown.trim() === '') { alert('\u8BF7\u8F93\u5165\u6587\u6863\u5185\u5BB9'); return; }
+
       submitButton.disabled = true;
       submitButton.textContent = '\u751F\u6210\u4E2D...';
 
@@ -522,26 +619,43 @@ var getHomePageFunctions = /* @__PURE__ */ __name(() => `
         const urlkey = await generateUrlkey();
         let encryptedContent;
         let usePasswordEncryption = false;
-        
+
         if (password) {
           usePasswordEncryption = true;
           encryptedContent = await encrypt(markdown, urlkey, password, btoa(String.fromCharCode(...urlkey)));
         } else {
           encryptedContent = await encrypt(markdown, urlkey);
         }
-        
+
+        const attachmentIds = [];
+        if (pendingFiles.length > 0) {
+          submitButton.textContent = '\u4E0A\u4F20\u9644\u4EF6\u4E2D...';
+          for (const item of pendingFiles) {
+            const result = await uploadSingleFile(item);
+            attachmentIds.push(result.fileId);
+          }
+        }
+
         const response = await sendSignedRequest('/submit', {
-          views, expiration, usePasswordEncryption, markdown: encryptedContent, allowViewerDestroy
+          views, expiration, usePasswordEncryption, markdown: encryptedContent, allowViewerDestroy, attachmentIds
         });
-        
+
         const data = await response.json();
         if (data.error) {
           alert(data.error);
         } else {
           const urlkeyBase64 = btoa(String.fromCharCode(...urlkey));
-          document.getElementById('link').textContent = data.link + '#' + urlkeyBase64;
+          const linkUrl = data.link + '#' + urlkeyBase64;
+          document.getElementById('link').textContent = linkUrl;
           document.getElementById('linkContainer').style.display = 'flex';
           copyLink();
+          document.getElementById('qrContainer').style.display = 'block';
+          document.getElementById('qrCode').innerHTML = '';
+          new QRCode(document.getElementById('qrCode'), {
+            text: linkUrl,
+            width: 160,
+            height: 160
+          });
         }
       } catch (error) {
         alert('\u52A0\u5BC6\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5: ' + error.message);
@@ -552,20 +666,20 @@ var getHomePageFunctions = /* @__PURE__ */ __name(() => `
     }, 300);
 
     let isPreviewMode = false;
-    
+
     const renderPreview = debounce(() => {
       configureMarked();
       document.getElementById('previewContent').innerHTML = marked.parse(document.getElementById('markdownText').value);
       hljs.highlightAll();
     }, 300);
-    
+
     const togglePreview = () => {
       const previewContainer = document.getElementById('previewContainer');
       const previewToggle = document.getElementById('previewToggle');
       const markdownText = document.getElementById('markdownText');
-      
+
       isPreviewMode = !isPreviewMode;
-      
+
       if (isPreviewMode) {
         renderPreview();
         previewContainer.style.display = 'block';
@@ -577,9 +691,35 @@ var getHomePageFunctions = /* @__PURE__ */ __name(() => `
         previewToggle.textContent = '\u9884\u89C8';
       }
     };
-    
-    document.getElementById('markdownText').addEventListener('input', () => {
+
+    const markdownTextEl = document.getElementById('markdownText');
+    markdownTextEl.addEventListener('input', () => {
       if (isPreviewMode) renderPreview();
+    });
+
+    markdownTextEl.addEventListener('dragover', e => e.preventDefault());
+    markdownTextEl.addEventListener('drop', e => {
+      e.preventDefault();
+      const files = e.dataTransfer.files;
+      for (const f of files) {
+        if (/\\.(md|txt|markdown)$/i.test(f.name)) {
+          const reader = new FileReader();
+          reader.onload = ev => { markdownTextEl.value = ev.target.result; updateCharCount(); };
+          reader.readAsText(f);
+          break;
+        }
+      }
+    });
+    markdownTextEl.addEventListener('paste', e => {
+      if (e.clipboardData.files && e.clipboardData.files.length > 0) {
+        const f = e.clipboardData.files[0];
+        if (/\\.(md|txt|markdown)$/i.test(f.name)) {
+          e.preventDefault();
+          const reader = new FileReader();
+          reader.onload = ev => { markdownTextEl.value = ev.target.result; updateCharCount(); };
+          reader.readAsText(f);
+        }
+      }
     });
 
     const updateCharCount = () => {
@@ -589,7 +729,7 @@ var getHomePageFunctions = /* @__PURE__ */ __name(() => `
     };
     updateCharCount();
   `, "getHomePageFunctions");
-var getDocPageContent = /* @__PURE__ */ __name((markdown, isError, remainingTime, remainingViews, docId, usePasswordEncryption, allowViewerDestroy) => `
+var getDocPageContent = /* @__PURE__ */ __name((markdown, isError, remainingTime, remainingViews, docId, usePasswordEncryption, allowViewerDestroy, attachmentLinks = []) => `
     <div class="doc-header" style="margin-bottom: 8px; margin-top: 40px;">
       <div class="doc-header-row" style="display: flex; align-items: center; gap: 8px;">
         <div class="info-block" style="flex: 1; display: flex; align-items: center; justify-content: space-between; background-color: var(--code-bg-color); border: 1px solid var(--border-color); border-radius: 4px; padding: 4px 8px; height: 32px; box-sizing: border-box;">
@@ -627,8 +767,22 @@ var getDocPageContent = /* @__PURE__ */ __name((markdown, isError, remainingTime
       </style>
     </div>
     <article class="markdown-body" id="markdown-container">${isError ? `${markdown}` : '<p><strong><span style="color: #ff0000;">\u{1F510}\u6B63\u5728\u7AEF\u5230\u7AEF\u89E3\u5BC6\u6587\u6863</span></strong></p>'}</article>
+    ${attachmentLinks && attachmentLinks.length > 0 ? `
+    <div class="attachments-section" style="margin-top: 16px; border-top: 1px solid var(--border-color); padding-top: 12px;">
+      <p style="margin: 0 0 8px; font-size: 14px; font-weight: bold; color: var(--text-color);">\uD83D\uDCCE \u9644\u4EF6</p>
+      ${attachmentLinks.map(att => {
+        const sizeStr = att.size >= 1048576 ? (att.size/1048576).toFixed(1)+"MB" : att.size >= 1024 ? (att.size/1024).toFixed(1)+"KB" : att.size+"B";
+        const dlInfo = att.remainingDownloads === -1 ? "" : `\uFF08\u5269\u4F59 ${att.remainingDownloads} \u6B21\u4E0B\u8F7D\uFF09`;
+        return `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background-color:var(--code-bg-color);border:1px solid var(--border-color);border-radius:4px;margin-bottom:6px;">
+          <span style="font-size:13px;flex:1;word-break:break-all;">${att.filename}</span>
+          <span style="font-size:12px;color:var(--text-color);opacity:0.6;flex-shrink:0;">${sizeStr}${dlInfo}</span>
+          <a href="${att.downloadUrl}" style="background-color:var(--link-color);color:#fff;border:none;padding:3px 8px;border-radius:4px;font-size:12px;text-decoration:none;flex-shrink:0;">\u4E0B\u8F7D</a>
+        </div>`;
+      }).join("")}
+    </div>
+    ` : ""}
   `, "getDocPageContent");
-var getHomePageContent = /* @__PURE__ */ __name(() => `
+var getHomePageContent = /* @__PURE__ */ __name((settings) => `
     <div class="header-section" style="text-align: center; margin-bottom: 8px; flex-shrink: 0;">
       <p style="margin: 0; font-size: 16px; color: var(--text-color); opacity: 0.8;">\u8BA9\u4F60\u7684\u79D8\u5BC6\u5728\u2601\uFE0F\u98DE\u4E00\u4F1A \u2708\uFE0F</p>
     </div>
@@ -636,7 +790,7 @@ var getHomePageContent = /* @__PURE__ */ __name(() => `
     <div class="form-section" style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
       <div class="form-group" style="margin-bottom: 8px; flex: 1; display: flex; flex-direction: column; min-height: 0;">
         <div class="editor-wrapper" style="position: relative; flex: 1; min-height: 300px;">
-          <textarea id="markdownText" class="editor-box" placeholder="\u8BF7\u8F93\u5165\u4F60\u7684\u79D8\u5BC6\u{1F4C4}\uFF0C\u652F\u6301 MarkDown \u683C\u5F0F\u3002" maxlength="100000" oninput="updateCharCount()"></textarea>
+          <textarea id="markdownText" class="editor-box" placeholder="\u8BF7\u8F93\u5165\u4F60\u7684\u79D8\u5BC6\uD83D\uDCC4\uFF0C\u652F\u6301 MarkDown \u683C\u5F0F\u3002" maxlength="100000" oninput="updateCharCount()"></textarea>
           <div style="position: absolute; bottom: 5px; right: 5px; font-size: 12px; color: var(--text-color); opacity: 0.7; z-index: 5;">
             <span id="charCount">0</span>/100000
           </div>
@@ -651,14 +805,14 @@ var getHomePageContent = /* @__PURE__ */ __name(() => `
         <div class="form-group" style="display: flex; align-items: center; gap: 6px; height: 38px; margin-bottom: 0;">
           <label for="views" style="margin: 0; flex-shrink: 0; font-size: 14px; color: var(--text-color); line-height: 38px;">\u231B \u67E5\u770B\u6B21\u6570\uFF1A</label>
           <div style="flex: 1; position: relative; display: flex; align-items: center;">
-            <input type="number" id="views" value="1" min="1" max="10000" step="1" oninput="this.value = this.value.replace(/[^0-9]/g, '')" style="width: 100%; height: 32px; margin: 0;">
+            <input type="number" id="views" value="${settings.defaultViews}" min="1" max="10000" step="1" oninput="this.value = this.value.replace(/[^0-9]/g, '')" style="width: 100%; height: 32px; margin: 0;">
           </div>
         </div>
 
         <div class="form-group" style="display: flex; align-items: center; gap: 6px; height: 38px; margin-bottom: 0;">
           <label for="expiration" style="margin: 0; flex-shrink: 0; font-size: 14px; color: var(--text-color); line-height: 38px;">\u23F2\uFE0F \u6709\u6548\u671F\uFF1A</label>
           <div style="flex: 1; position: relative; display: flex; align-items: center;">
-            <input type="number" id="expiration" value="1440" min="1" step="1" oninput="this.value = this.value.replace(/[^0-9]/g, '')" style="width: 100%; height: 32px; margin: 0;">
+            <input type="number" id="expiration" value="${settings.defaultExpiration}" min="1" step="1" oninput="this.value = this.value.replace(/[^0-9]/g, '')" style="width: 100%; height: 32px; margin: 0;">
           </div>
           <small style="flex-shrink: 0; font-size: 12px; color: var(--text-color); opacity: 0.7; line-height: 38px; margin: 0;">\u5206\u949F</small>
         </div>
@@ -681,8 +835,28 @@ var getHomePageContent = /* @__PURE__ */ __name(() => `
         <div style="display: flex; align-items: center; gap: 6px; height: 100%;">
           <label for="allowViewerDestroy" style="margin: 0; flex-shrink: 0; font-size: 14px; color: var(--text-color); line-height: 38px;">\u{1F6AB} \u5141\u8BB8\u8BBF\u95EE\u7AEF\u9500\u6BC1\uFF1A</label>
           <select id="allowViewerDestroy" style="height: 32px; margin: 0; padding: 0 8px; border: 1px solid var(--border-color); border-radius: 4px; background-color: var(--bg-color); color: var(--text-color); font-size: 14px; box-sizing: border-box; width: auto;">
-            <option value="yes">\u662F\uFF08\u9ED8\u8BA4\uFF09</option>
-            <option value="no">\u5426</option>
+            <option value="yes" ${settings.defaultAllowViewerDestroy ? "selected" : ""}>\u662F\uFF08\u9ED8\u8BA4\uFF09</option>
+            <option value="no" ${!settings.defaultAllowViewerDestroy ? "selected" : ""}>\u5426</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="attachSection" style="margin-top: 8px; flex-shrink: 0;">
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <label style="margin: 0; flex-shrink: 0; font-size: 14px; color: var(--text-color); line-height: 38px;">\uD83D\uDCCE \u9644\u4EF6\uFF1A</label>
+          <input type="file" id="fileInput" style="display:none" multiple>
+          <button type="button" id="addFileBtn" onclick="document.getElementById('fileInput').click()" style="background-color: #6c757d; padding: 4px 10px; font-size: 13px; width: auto; height: 32px; margin: 0;">\u9009\u62E9\u6587\u4EF6</button>
+          <small style="font-size: 12px; color: var(--text-color); opacity: 0.7;">\u6700\u5927 100 MB/\u6587\u4EF6</small>
+        </div>
+        <div id="fileList" style="margin-top: 4px;"></div>
+        <div id="attachOptions" style="display:none; margin-top: 6px; flex-wrap: wrap; gap: 8px; align-items: center;">
+          <label style="font-size: 13px; color: var(--text-color);">\u6700\u5927\u4E0B\u8F7D\u6B21\u6570\uFF1A</label>
+          <input type="number" id="attachMaxDownloads" value="${settings.defaultAttachmentMaxDownloads}" min="-1" style="width: 70px; height: 28px; margin: 0; padding: 2px 4px; font-size: 13px;" title="-1 \u4E3A\u65E0\u9650\u5236">
+          <small style="font-size: 12px; opacity: 0.7;">-1 \u65E0\u9650</small>
+          <label style="font-size: 13px; color: var(--text-color); margin-left: 8px;">\u6BCF\u6B21\u8BBF\u95EE\u9650\u4E0B\u8F7D\u4E00\u6B21\uFF1A</label>
+          <select id="attachOnePerAccess" style="height: 28px; padding: 0 6px; border: 1px solid var(--border-color); border-radius: 4px; background-color: var(--bg-color); color: var(--text-color); font-size: 13px;">
+            <option value="false" ${!settings.defaultAttachmentOnePerAccess ? "selected" : ""}>\u5426</option>
+            <option value="true" ${settings.defaultAttachmentOnePerAccess ? "selected" : ""}>\u662F</option>
           </select>
         </div>
       </div>
@@ -724,6 +898,9 @@ var getHomePageContent = /* @__PURE__ */ __name(() => `
         <h3 style="margin: 0; font-size: 14px; color: var(--text-color); flex-shrink: 0; line-height: 22px;">\u5206\u4EAB\u94FE\u63A5\uFF1A</h3>
         <p id="link" onclick="copyLink()" style="margin: 0; word-wrap: break-word; color: var(--link-color); cursor: pointer; flex: 1; min-width: 0; line-height: 22px; font-size: 14px;"></p>
       </div>
+      <div id="qrContainer" style="display:none; margin-top: 8px; text-align: center;">
+        <div id="qrCode" style="display: inline-block;"></div>
+      </div>
     </div>
 
     <div class="notification" id="notification">\u2705 \u94FE\u63A5\u5DF2\u590D\u5236\u5230\u526A\u8D34\u677F</div>
@@ -732,11 +909,12 @@ var getHomePageContent = /* @__PURE__ */ __name(() => `
       <p style="margin: 0;">\u79D8\u5BC6\u6587\u6863 - \u6781\u7B80\u3001\u5F00\u6E90\u7AEF\u5230\u7AEF\u52A0\u5BC6\u7684\u9605\u540E\u5373\u711A\u6587\u6863\u3002 | TIANYIMC<a href="https://github.com/tianyimc/Cloudflare-Worker-Secret-doc" target="_blank" rel="noopener noreferrer" style="color: var(--link-color); text-decoration: none;">\u57FA\u4E8E\u5F00\u6E90\u9879\u76EE</a> | v1.5.1.1 | <a href="/admin" style="color: var(--link-color); text-decoration: none;">\u{1F4CB} \u7BA1\u7406</a></p>
     </div>
   `, "getHomePageContent");
-function renderHTML(markdown = "", isDocPage = false, remainingViews = 0, isError = false, remainingTime = 0, docId = "", usePasswordEncryption = false, allowViewerDestroy = true) {
+function renderHTML(markdown = "", isDocPage = false, remainingViews = 0, isError = false, remainingTime = 0, docId = "", usePasswordEncryption = false, allowViewerDestroy = true, attachmentLinks = [], settings = null) {
+  const effectiveSettings = settings || DEFAULT_SETTINGS;
   const commonFunctions = getCommonFunctions();
   const docPageFunctions = getDocPageFunctions(markdown, isError, remainingTime, remainingViews, docId, usePasswordEncryption);
-  const homePageFunctions = getHomePageFunctions();
-  const pageContent = isDocPage ? getDocPageContent(markdown, isError, remainingTime, remainingViews, docId, usePasswordEncryption, allowViewerDestroy) : getHomePageContent();
+  const homePageFunctions = getHomePageFunctions(effectiveSettings);
+  const pageContent = isDocPage ? getDocPageContent(markdown, isError, remainingTime, remainingViews, docId, usePasswordEncryption, allowViewerDestroy, attachmentLinks) : getHomePageContent(effectiveSettings);
   const pageFunctions = isDocPage ? docPageFunctions : homePageFunctions;
   return `<!DOCTYPE html>
 <html lang="zh">
@@ -752,6 +930,7 @@ function renderHTML(markdown = "", isDocPage = false, remainingViews = 0, isErro
   <link id="highlight-theme-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/github-dark.min.css" disabled>
   <script src="https://fastly.jsdelivr.net/npm/marked/marked.min.js"><\/script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"><\/script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"><\/script>
   <style>
     :root {
       --bg-color: #fff;
@@ -956,7 +1135,7 @@ async function createDocument(request, env) {
   if (new Blob([requestBody]).size > 100 * 1024) {
     return new Response("", { status: 204, headers: { "Content-Type": "text/plain; charset=UTF-8" } });
   }
-  const { markdown, views, expiration, usePasswordEncryption, allowViewerDestroy } = JSON.parse(requestBody);
+  const { markdown, views, expiration, usePasswordEncryption, allowViewerDestroy, attachmentIds } = JSON.parse(requestBody);
   const errorMessage = validateInput(markdown, views, expiration);
   if (errorMessage) {
     return createJSONResponse({ error: errorMessage }, 400);
@@ -967,7 +1146,14 @@ async function createDocument(request, env) {
     return createJSONResponse({ error: "\u65E0\u6548\u7684\u53C2\u6570\u503C" }, 400);
   }
   const docId = await generateDocId(Config.Shareid_control);
-  await env.Worker_Secret_doc.put(docId, JSON.stringify({ markdown, views: viewsInt, expiration: expirationMs, usePasswordEncryption, allowViewerDestroy: allowViewerDestroy !== false }));
+  await env.Worker_Secret_doc.put(docId, JSON.stringify({
+    markdown,
+    views: viewsInt,
+    expiration: expirationMs,
+    usePasswordEncryption,
+    allowViewerDestroy: allowViewerDestroy !== false,
+    attachmentIds: Array.isArray(attachmentIds) ? attachmentIds : []
+  }));
   const link = `${getReadOrigin(request)}/${Config.SharePath}/${generateDocIdWithCrc(docId)}`;
   return createJSONResponse({ link });
 }
@@ -998,9 +1184,31 @@ async function getDocument(docIdWithCrc, env, request) {
       await env.Worker_Secret_doc.put(docId, JSON.stringify(data));
     }
   }
+  const attachmentLinks = [];
+  if (Array.isArray(data.attachmentIds) && data.attachmentIds.length > 0) {
+    for (const fileId of data.attachmentIds) {
+      try {
+        const metaStr = await env.Worker_Secret_doc.get(`file:${fileId}`);
+        if (!metaStr) continue;
+        const fileMeta = JSON.parse(metaStr);
+        let downloadUrl = `/file/${fileId}`;
+        if (fileMeta.onePerAccess) {
+          const token = await generateDownloadToken(fileId, env);
+          downloadUrl = `/file/${fileId}?token=${token}`;
+        }
+        attachmentLinks.push({
+          filename: fileMeta.filename,
+          size: fileMeta.size,
+          contentType: fileMeta.contentType,
+          remainingDownloads: fileMeta.remainingDownloads,
+          downloadUrl
+        });
+      } catch {}
+    }
+  }
   const remainingTime = Math.max(0, data.expiration - Date.now());
   const allowViewerDestroy = data.allowViewerDestroy !== false;
-  return createHTMLResponse(renderHTML(data.markdown, true, data.views, false, remainingTime, docIdWithCrc, data.usePasswordEncryption || false, allowViewerDestroy));
+  return createHTMLResponse(renderHTML(data.markdown, true, data.views, false, remainingTime, docIdWithCrc, data.usePasswordEncryption || false, allowViewerDestroy, attachmentLinks));
 }
 __name(getDocument, "getDocument");
 async function deleteDocument(docIdWithCrc, env, request) {
@@ -1031,6 +1239,14 @@ async function deleteDocument(docIdWithCrc, env, request) {
 __name(deleteDocument, "deleteDocument");
 
 async function archiveDocument(docId, docIdWithCrc, shareUrl, data, reason, env) {
+  if (Array.isArray(data.attachmentIds) && data.attachmentIds.length > 0) {
+    for (const fileId of data.attachmentIds) {
+      try {
+        await env.Worker_Secret_doc.delete(`file:${fileId}`);
+        if (env.Secret_doc_R2) await env.Secret_doc_R2.delete(fileId);
+      } catch {}
+    }
+  }
   const histData = {
     docIdWithCrc,
     shareUrl,
@@ -1067,6 +1283,7 @@ async function listDocuments(request, env) {
             expiration: data.expiration,
             views: data.views,
             usePasswordEncryption: data.usePasswordEncryption || false,
+            attachmentCount: Array.isArray(data.attachmentIds) ? data.attachmentIds.length : 0,
             shareUrl: `${origin}/${Config.SharePath}/${docIdWithCrc}`
           });
         } else {
@@ -1083,6 +1300,235 @@ async function listDocuments(request, env) {
   return createJSONResponse({ active, history });
 }
 __name(listDocuments, "listDocuments");
+
+async function generateDownloadToken(fileId, env) {
+  const tokenBytes = new Uint8Array(16);
+  crypto.getRandomValues(tokenBytes);
+  const token = Array.from(tokenBytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+  await env.Worker_Secret_doc.put(`dltoken:${token}`, JSON.stringify({ fileId, expiresAt: Date.now() + 3600000 }), { expirationTtl: 3600 });
+  return token;
+}
+__name(generateDownloadToken, "generateDownloadToken");
+
+async function uploadFile(request, env) {
+  if (!env.Secret_doc_R2) return createJSONResponse({ error: "R2\u672A\u914D\u7F6E" }, 500);
+  let formData;
+  try {
+    formData = await request.formData();
+  } catch {
+    return createJSONResponse({ error: "\u8BF7\u6C42\u4F53\u65E0\u6548" }, 400);
+  }
+  const file = formData.get("file");
+  const metaStr = formData.get("_meta");
+  const sigHeader = request.headers.get("X-Signature");
+  if (!file || !metaStr || !sigHeader) return createJSONResponse({ error: "\u53C2\u6570\u7F3A\u5931" }, 400);
+  const valid = await verifyHmacSignature(metaStr, sigHeader, Config.HmacKey);
+  if (!valid) return createForbiddenResponse();
+  let meta;
+  try {
+    meta = JSON.parse(metaStr);
+  } catch {
+    return createJSONResponse({ error: "\u65E0\u6548\u7684\u5143\u6570\u636E" }, 400);
+  }
+  const MAX_SIZE = 100 * 1024 * 1024;
+  if (file.size > MAX_SIZE) return createJSONResponse({ error: "\u6587\u4EF6\u5927\u5C0F\u8D85\u8FC7100MB\u9650\u5236" }, 400);
+  const filename = file.name || "file";
+  const contentType = file.type || "application/octet-stream";
+  const timestamp = Date.now().toString();
+  const randomBytes = new Uint8Array(16);
+  crypto.getRandomValues(randomBytes);
+  const enc = new TextEncoder();
+  const nameBytes = enc.encode(filename + timestamp);
+  const combined = new Uint8Array(nameBytes.length + randomBytes.length);
+  combined.set(nameBytes, 0);
+  combined.set(randomBytes, nameBytes.length);
+  const hashBuf = await crypto.subtle.digest("SHA-256", combined);
+  const fileId = Array.from(new Uint8Array(hashBuf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  const arrayBuffer = await file.arrayBuffer();
+  await env.Secret_doc_R2.put(fileId, arrayBuffer, { httpMetadata: { contentType } });
+  const maxDownloads = meta.maxDownloads !== undefined ? parseInt(meta.maxDownloads) : -1;
+  const onePerAccess = meta.onePerAccess === true;
+  const fileMeta = {
+    filename,
+    contentType,
+    size: file.size,
+    maxDownloads,
+    onePerAccess,
+    remainingDownloads: maxDownloads,
+    uploadedAt: Date.now()
+  };
+  await env.Worker_Secret_doc.put(`file:${fileId}`, JSON.stringify(fileMeta));
+  return createJSONResponse({ fileId, filename, size: file.size, contentType });
+}
+__name(uploadFile, "uploadFile");
+
+async function downloadFile(fileId, token, env) {
+  if (!env.Secret_doc_R2) return new Response("\u670D\u52A1\u672A\u914D\u7F6E", { status: 500, headers: { "Content-Type": "text/plain; charset=UTF-8" } });
+  const metaStr = await env.Worker_Secret_doc.get(`file:${fileId}`);
+  if (!metaStr) return new Response("\u6587\u4EF6\u4E0D\u5B58\u5728\u6216\u5DF2\u8FC7\u671F", { status: 404, headers: { "Content-Type": "text/plain; charset=UTF-8" } });
+  let meta;
+  try {
+    meta = JSON.parse(metaStr);
+  } catch {
+    return new Response("\u6587\u4EF6\u6570\u636E\u65E0\u6548", { status: 404, headers: { "Content-Type": "text/plain; charset=UTF-8" } });
+  }
+  if (meta.onePerAccess === true) {
+    if (!token) return new Response("\u9700\u8981\u4E0B\u8F7D\u4EE4\u724C", { status: 403, headers: { "Content-Type": "text/plain; charset=UTF-8" } });
+    const tokenDataStr = await env.Worker_Secret_doc.get(`dltoken:${token}`);
+    if (!tokenDataStr) return new Response("\u4E0B\u8F7D\u4EE4\u724C\u65E0\u6548\u6216\u5DF2\u8FC7\u671F", { status: 403, headers: { "Content-Type": "text/plain; charset=UTF-8" } });
+    let tokenData;
+    try { tokenData = JSON.parse(tokenDataStr); } catch { return new Response("\u4EE4\u724C\u6570\u636E\u65E0\u6548", { status: 403, headers: { "Content-Type": "text/plain; charset=UTF-8" } }); }
+    if (tokenData.fileId !== fileId) return new Response("\u4EE4\u724C\u4E0E\u6587\u4EF6\u4E0D\u5339\u914D", { status: 403, headers: { "Content-Type": "text/plain; charset=UTF-8" } });
+    if (Date.now() > tokenData.expiresAt) return new Response("\u4E0B\u8F7D\u4EE4\u724C\u5DF2\u8FC7\u671F", { status: 403, headers: { "Content-Type": "text/plain; charset=UTF-8" } });
+    await env.Worker_Secret_doc.delete(`dltoken:${token}`);
+  }
+  if (meta.remainingDownloads === 0) return new Response("\u6587\u4EF6\u4E0B\u8F7D\u6B21\u6570\u5DF2\u7528\u5B8C", { status: 410, headers: { "Content-Type": "text/plain; charset=UTF-8" } });
+  const r2Object = await env.Secret_doc_R2.get(fileId);
+  if (!r2Object) return new Response("\u6587\u4EF6\u4E0D\u5B58\u5728", { status: 404, headers: { "Content-Type": "text/plain; charset=UTF-8" } });
+  if (meta.remainingDownloads !== -1) {
+    meta.remainingDownloads -= 1;
+    if (meta.remainingDownloads <= 0) {
+      await env.Worker_Secret_doc.delete(`file:${fileId}`);
+      await env.Secret_doc_R2.delete(fileId);
+    } else {
+      await env.Worker_Secret_doc.put(`file:${fileId}`, JSON.stringify(meta));
+    }
+  }
+  const safeFilename = encodeURIComponent(meta.filename);
+  return new Response(r2Object.body, {
+    headers: {
+      "Content-Type": meta.contentType || "application/octet-stream",
+      "Content-Disposition": `attachment; filename*=UTF-8''${safeFilename}`,
+      "Cache-Control": "no-store"
+    }
+  });
+}
+__name(downloadFile, "downloadFile");
+
+async function getSettingsPageHTML(env) {
+  const settings = await getSettings(env);
+  return `<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>\u2699\uFE0F \u8BBE\u7F6E - Secret Doc</title>
+  <style>
+    :root { --bg-color:#fff; --text-color:#24292e; --link-color:#0366d6; --border-color:#e1e4e8; --code-bg-color:#f6f8fa; }
+    @media (prefers-color-scheme: dark) { :root { --bg-color:#0d1117; --text-color:#c9d1d9; --link-color:#58a6ff; --border-color:#30363d; --code-bg-color:#161b22; } }
+    body { font-family: Arial, sans-serif; background-color: var(--bg-color); color: var(--text-color); margin: 0; padding: 20px; min-height: 100vh; box-sizing: border-box; visibility: hidden; }
+    .settings-container { max-width: 700px; margin: 0 auto; }
+    h2 { margin: 0 0 16px; font-size: 20px; }
+    .section-title { font-size: 15px; font-weight: bold; margin: 20px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color); }
+    .form-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .form-row label { min-width: 220px; font-size: 14px; color: var(--text-color); }
+    .form-row input, .form-row select { flex: 1; height: 32px; padding: 0 8px; border: 1px solid var(--border-color); border-radius: 4px; background-color: var(--bg-color); color: var(--text-color); font-size: 14px; box-sizing: border-box; }
+    button { background-color: var(--link-color); color: #fff; border: none; padding: 8px 20px; cursor: pointer; border-radius: 4px; font-size: 14px; }
+    button:hover { opacity: 0.8; }
+    a { color: var(--link-color); }
+    .notification { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background-color: var(--link-color); color: #fff; padding: 10px 20px; border-radius: 4px; display: none; z-index: 1000; }
+    .theme-toggle { position: fixed; top: 14px; right: 20px; cursor: pointer; }
+    .theme-toggle input { display: none; }
+    .theme-toggle label { display: block; width: 40px; height: 20px; background-color: #ccc; border-radius: 20px; position: relative; transition: background-color 0.3s; }
+    .theme-toggle label:before { content: "\u2600\uFE0F"; display: flex; justify-content: center; align-items: center; width: 16px; height: 16px; border-radius: 50%; background-color: #fff; position: absolute; top: 2px; left: 2px; transition: transform 0.3s; font-size: 10px; }
+    .theme-toggle input:checked + label { background-color: #2196F3; }
+    .theme-toggle input:checked + label:before { content: "\u{1F319}"; transform: translateX(20px); }
+    .about-text { font-size: 14px; line-height: 1.8; color: var(--text-color); }
+    @media (max-width: 600px) { .form-row { flex-direction: column; align-items: flex-start; } .form-row label { min-width: auto; } .form-row input, .form-row select { width: 100%; } }
+  </style>
+</head>
+<body>
+  <div class="theme-toggle"><input type="checkbox" id="theme-toggle-checkbox"><label for="theme-toggle-checkbox"></label></div>
+  <div class="settings-container">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+      <a href="/admin" style="font-size:14px;">\u2190 \u8FD4\u56DE\u7BA1\u7406</a>
+      <h2 style="margin:0;">\u2699\uFE0F \u8BBE\u7F6E</h2>
+    </div>
+    <div class="section-title">\u9ED8\u8BA4\u503C\u8BBE\u7F6E</div>
+    <div class="form-row">
+      <label>\u9ED8\u8BA4\u67E5\u770B\u6B21\u6570</label>
+      <input type="number" id="defaultViews" value="${settings.defaultViews}" min="1">
+    </div>
+    <div class="form-row">
+      <label>\u9ED8\u8BA4\u6709\u6548\u65F6\u957F\uFF08\u5206\u949F\uFF09</label>
+      <input type="number" id="defaultExpiration" value="${settings.defaultExpiration}" min="1">
+    </div>
+    <div class="form-row">
+      <label>\u9ED8\u8BA4\u5141\u8BB8\u8BBF\u95EE\u7AEF\u9500\u6BC1</label>
+      <select id="defaultAllowViewerDestroy">
+        <option value="true" ${settings.defaultAllowViewerDestroy ? "selected" : ""}>\u662F</option>
+        <option value="false" ${!settings.defaultAllowViewerDestroy ? "selected" : ""}>\u5426</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>\u9644\u4EF6\u8B66\u544A\u6700\u5C0F\u5927\u5C0F\uFF08MB\uFF09</label>
+      <input type="number" id="attachmentWarnSizeMB" value="${settings.attachmentWarnSizeMB}" min="1" step="0.1">
+    </div>
+    <div class="form-row">
+      <label>\u9644\u4EF6\u9ED8\u8BA4\u6700\u5927\u4E0B\u8F7D\u6B21\u6570</label>
+      <input type="number" id="defaultAttachmentMaxDownloads" value="${settings.defaultAttachmentMaxDownloads}" title="-1 \u4E3A\u65E0\u9650\u5236">
+    </div>
+    <div class="form-row">
+      <label>\u9ED8\u8BA4\u9650\u5236\u6BCF\u6B21\u8BBF\u95EE\u53EA\u80FD\u4E0B\u8F7D\u4E00\u6B21\u9644\u4EF6</label>
+      <select id="defaultAttachmentOnePerAccess">
+        <option value="false" ${!settings.defaultAttachmentOnePerAccess ? "selected" : ""}>\u5426</option>
+        <option value="true" ${settings.defaultAttachmentOnePerAccess ? "selected" : ""}>\u662F</option>
+      </select>
+    </div>
+    <button onclick="saveSettings()">\u4FDD\u5B58\u8BBE\u7F6E</button>
+
+    <div class="section-title">\u5173\u4E8E</div>
+    <div class="about-text">
+      <p>\u4F5C\u8005\uFF1Atianyimc</p>
+      <p>\u9879\u76EE\u94FE\u63A5\uFF1A<a href="https://github.com/tianyimc/Cloudflare-Worker-Secret-doc" target="_blank" rel="noopener noreferrer">tianyimc/Cloudflare-Worker-Secret-doc</a></p>
+      <p>\u8054\u7CFB\u90AE\u7BB1\uFF1Acontact@tianyimc.com</p>
+      <p>\u611F\u8C22\u539F\u4ED3\u5E93\u4F5C\u8005 fzxx \u7684\u5F00\u6E90\u8D21\u732E\uFF0C\u672C\u9879\u76EE\u57FA\u4E8E\u5176\u5DE5\u4F5C\u8FDB\u884C\u4E8C\u6B21\u5F00\u53D1\u3002</p>
+    </div>
+  </div>
+  <div class="notification" id="notification"></div>
+  <script>
+    ${getCommonFunctions()}
+
+    const saveSettings = async () => {
+      const data = {
+        defaultViews: parseInt(document.getElementById('defaultViews').value) || 1,
+        defaultExpiration: parseInt(document.getElementById('defaultExpiration').value) || 1440,
+        defaultAllowViewerDestroy: document.getElementById('defaultAllowViewerDestroy').value === 'true',
+        attachmentWarnSizeMB: parseFloat(document.getElementById('attachmentWarnSizeMB').value) || 64,
+        defaultAttachmentMaxDownloads: parseInt(document.getElementById('defaultAttachmentMaxDownloads').value) || -1,
+        defaultAttachmentOnePerAccess: document.getElementById('defaultAttachmentOnePerAccess').value === 'true'
+      };
+      try {
+        const resp = await sendSignedRequest('/api/settings', data);
+        const result = await resp.json();
+        if (result.success) {
+          const n = document.getElementById('notification');
+          n.textContent = '\u2705 \u8BBE\u7F6E\u5DF2\u4FDD\u5B58';
+          n.style.display = 'block';
+          setTimeout(() => n.style.display = 'none', 2500);
+        } else {
+          alert('\u4FDD\u5B58\u5931\u8D25: ' + (result.error || '\u672A\u77E5\u9519\u8BEF'));
+        }
+      } catch (e) {
+        alert('\u4FDD\u5B58\u5931\u8D25: ' + e.message);
+      }
+    };
+
+    window.addEventListener('DOMContentLoaded', () => { document.body.style.visibility = 'visible'; });
+  <\/script>
+</body>
+</html>`;
+}
+__name(getSettingsPageHTML, "getSettingsPageHTML");
+
+async function saveSettingsAPI(request, env) {
+  const body = await request.text();
+  let data;
+  try { data = JSON.parse(body); } catch { return createJSONResponse({ error: "\u65E0\u6548\u7684\u8BF7\u6C42\u4F53" }, 400); }
+  await saveSettings(env, data);
+  return createJSONResponse({ success: true });
+}
+__name(saveSettingsAPI, "saveSettingsAPI");
 
 function getAdminPageHTML(request) {
   const commonFunctions = getCommonFunctions();
@@ -1311,7 +1757,7 @@ function getAdminPageHTML(request) {
 
   <div class="notification" id="notification"></div>
   <div style="margin-top: 16px; text-align: center; font-size: 14px; color: var(--text-color); opacity: 0.8; padding-top: 10px; border-top: 1px solid var(--border-color);">
-    <p style="margin: 0;">\u79D8\u5BC6\u6587\u6863 - \u6781\u7B80\u3001\u5F00\u6E90\u7AEF\u5230\u7AEF\u52A0\u5BC6\u7684\u9605\u540E\u5373\u711A\u6587\u6863\u3002 | TIANYIMC<a href="https://github.com/tianyimc/Cloudflare-Worker-Secret-doc" target="_blank" rel="noopener noreferrer" style="color: var(--link-color); text-decoration: none;">\u57FA\u4E8E\u5F00\u6E90\u9879\u76EE</a> | v1.5.1.1</p>
+    <p style="margin: 0;">\u79D8\u5BC6\u6587\u6863 - \u6781\u7B80\u3001\u5F00\u6E90\u7AEF\u5230\u7AEF\u52A0\u5BC6\u7684\u9605\u540E\u5373\u711A\u6587\u6863\u3002 | TIANYIMC<a href="https://github.com/tianyimc/Cloudflare-Worker-Secret-doc" target="_blank" rel="noopener noreferrer" style="color: var(--link-color); text-decoration: none;">\u57FA\u4E8E\u5F00\u6E90\u9879\u76EE</a> | v1.5.1.1 | <a href="/settings" style="color: var(--link-color);">\u2699\uFE0F \u8BBE\u7F6E</a></p>
   </div>
   <script>
     ${commonFunctions}
@@ -1562,12 +2008,13 @@ __name(verifyCfAccessJwt, "verifyCfAccessJwt");
 
 var homePageCache = null;
 var homePageCacheTime = 0;
-function getHomePage() {
+async function getHomePage(env) {
   const now = Date.now();
   if (homePageCache && now - homePageCacheTime < Config.HomePageCacheDuration) {
     return createHTMLResponse(homePageCache, 200, Config.BrowserCacheDuration);
   }
-  homePageCache = renderHTML();
+  const settings = await getSettings(env);
+  homePageCache = renderHTML("", false, 0, false, 0, "", false, true, [], settings);
   homePageCacheTime = now;
   return createHTMLResponse(homePageCache, 200, Config.BrowserCacheDuration);
 }
@@ -1576,7 +2023,7 @@ __name(getHomePage, "getHomePage");
 async function handleRequest(request, env) {
   const url = new URL(request.url);
   const { pathname, hostname } = url;
-  const isWriteRequest = request.method === "POST" || (request.method === "GET" && (pathname === "/" || pathname === "/admin" || pathname === "/api/docs"));
+  const isWriteRequest = request.method === "POST" || (request.method === "GET" && (pathname === "/" || pathname === "/admin" || pathname === "/api/docs" || pathname === "/settings" || pathname === "/api/settings"));
   if (isWriteRequest && Config.WriteDomain) {
     if (hostname !== Config.WriteDomain) {
       return createHTMLResponse(`<!DOCTYPE html>
@@ -1687,6 +2134,12 @@ async function handleRequest(request, env) {
     }
   }
   if (request.method === "POST") {
+    if (pathname === "/upload") return await uploadFile(request, env);
+    if (pathname === "/api/settings") {
+      const requestClone = request.clone();
+      if (!await verifyRequestSignature(requestClone)) return createForbiddenResponse();
+      return await saveSettingsAPI(request, env);
+    }
     const requestClone = request.clone();
     if (!await verifyRequestSignature(requestClone)) {
       return createForbiddenResponse();
@@ -1697,11 +2150,22 @@ async function handleRequest(request, env) {
     }
     return createForbiddenResponse();
   }
+  if (request.method === "GET" && pathname.startsWith("/file/")) {
+    const fileId = pathname.replace("/file/", "");
+    const token = url.searchParams.get("token") || null;
+    return await downloadFile(fileId, token, env);
+  }
+  if (request.method === "GET" && pathname === "/settings") {
+    return createHTMLResponse(await getSettingsPageHTML(env));
+  }
+  if (request.method === "GET" && pathname === "/api/settings") {
+    return createJSONResponse(await getSettings(env));
+  }
   if (request.method === "GET" && pathname.startsWith(`/${Config.SharePath}/`)) {
     return await getDocument(pathname.replace(`/${Config.SharePath}/`, ""), env, request);
   }
   if (request.method === "GET" && pathname === "/") {
-    return getHomePage();
+    return await getHomePage(env);
   }
   if (request.method === "GET" && pathname === "/admin") {
     return createHTMLResponse(getAdminPageHTML(request));
