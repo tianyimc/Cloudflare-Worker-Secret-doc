@@ -988,6 +988,305 @@ async function deleteDocument(docIdWithCrc, env) {
 }
 __name(deleteDocument, "deleteDocument");
 
+async function listDocuments(request, env) {
+  const origin = new URL(request.url).origin;
+  const docs = [];
+  let cursor = void 0;
+  const now = Date.now();
+  do {
+    const listResult = await env.Worker_Secret_doc.list(cursor !== void 0 ? { cursor } : {});
+    for (const key of listResult.keys) {
+      const value = await env.Worker_Secret_doc.get(key.name);
+      if (!value) continue;
+      try {
+        const data = JSON.parse(value);
+        if (!isNaN(data.expiration) && data.expiration > now) {
+          const docIdWithCrc = generateDocIdWithCrc(key.name);
+          docs.push({
+            docIdWithCrc,
+            expiration: data.expiration,
+            views: data.views,
+            usePasswordEncryption: data.usePasswordEncryption || false,
+            shareUrl: `${origin}/${Config.SharePath}/${docIdWithCrc}`
+          });
+        } else {
+          await env.Worker_Secret_doc.delete(key.name);
+        }
+      } catch {
+      }
+    }
+    cursor = listResult.list_complete ? void 0 : listResult.cursor;
+  } while (cursor !== void 0);
+  return createJSONResponse(docs);
+}
+__name(listDocuments, "listDocuments");
+
+function getAdminPageHTML(request) {
+  const commonFunctions = getCommonFunctions();
+  return `<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>\u6587\u6863\u7BA1\u7406 - Secret Doc</title>
+  <link id="highlight-theme-light" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/github.min.css">
+  <link id="highlight-theme-dark" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/styles/github-dark.min.css" disabled>
+  <style>
+    :root {
+      --bg-color: #fff;
+      --text-color: #24292e;
+      --link-color: #0366d6;
+      --border-color: #e1e4e8;
+      --code-bg-color: #f6f8fa;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg-color: #0d1117;
+        --text-color: #c9d1d9;
+        --link-color: #58a6ff;
+        --border-color: #30363d;
+        --code-bg-color: #161b22;
+      }
+    }
+    body {
+      font-family: Arial, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      margin: 0;
+      padding: 20px;
+      min-height: 100vh;
+      box-sizing: border-box;
+      visibility: hidden;
+    }
+    .admin-container {
+      background-color: var(--bg-color);
+      padding: 20px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+      border-radius: 8px;
+      max-width: 1100px;
+      margin: 0 auto;
+      border: 1px solid var(--border-color);
+      position: relative;
+    }
+    @media (prefers-color-scheme: dark) {
+      .admin-container { box-shadow: 0 0 10px rgba(255,255,255,0.1); }
+    }
+    h2 { color: var(--text-color); margin-top: 0; font-size: 18px; }
+    button {
+      background-color: var(--link-color);
+      color: #fff;
+      border: none;
+      padding: 6px 12px;
+      cursor: pointer;
+      border-radius: 4px;
+      font-size: 13px;
+      width: auto;
+      margin: 0;
+    }
+    button:hover { opacity: 0.8; }
+    button.danger { background-color: #dc3545; }
+    input[type="checkbox"] { width: auto; margin: 0; padding: 0; cursor: pointer; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+    th, td { border: 1px solid var(--border-color); padding: 8px 10px; text-align: left; }
+    th { background-color: var(--code-bg-color); font-weight: bold; }
+    tr:hover td { background-color: var(--code-bg-color); }
+    .share-link { color: var(--link-color); cursor: pointer; word-break: break-all; font-size: 12px; }
+    .share-link:hover { text-decoration: underline; }
+    .theme-toggle {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      cursor: pointer;
+      z-index: 1000;
+    }
+    .theme-toggle input { display: none; }
+    .theme-toggle label {
+      display: block;
+      width: 40px;
+      height: 20px;
+      background-color: #ccc;
+      border-radius: 20px;
+      position: relative;
+      transition: background-color 0.3s;
+    }
+    .theme-toggle label:before {
+      content: "\u2600\uFE0F";
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background-color: #fff;
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      transition: transform 0.3s;
+      font-size: 10px;
+    }
+    .theme-toggle input:checked + label { background-color: #2196F3; }
+    .theme-toggle input:checked + label:before { content: "\u{1F319}"; transform: translateX(20px); }
+    .notification {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background-color: var(--link-color);
+      color: #fff;
+      padding: 10px 20px;
+      border-radius: 4px;
+      display: none;
+      z-index: 1000;
+    }
+    .toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+    .toolbar label { font-size: 13px; cursor: pointer; margin: 0; }
+    .status-bar { font-size: 12px; color: var(--text-color); opacity: 0.7; margin-left: auto; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background-color: var(--bg-color); }
+    ::-webkit-scrollbar-thumb { background-color: var(--border-color); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background-color: #aaa; }
+    @media (max-width: 768px) {
+      body { padding: 10px; }
+      table { font-size: 11px; }
+      th, td { padding: 5px 6px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="admin-container">
+    <div class="theme-toggle">
+      <input type="checkbox" id="theme-toggle-checkbox">
+      <label for="theme-toggle-checkbox"></label>
+    </div>
+    <h2>\u{1F4CB} \u6587\u6863\u7BA1\u7406</h2>
+    <div class="toolbar">
+      <button onclick="loadDocs()">\u{1F504} \u5237\u65B0</button>
+      <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this.checked)">
+      <label for="selectAll">\u5168\u9009</label>
+      <button class="danger" onclick="deleteSelected()">\u{1F5D1}\uFE0F \u5220\u9664\u6240\u9009</button>
+      <span class="status-bar" id="statusBar">\u52A0\u8F7D\u4E2D...</span>
+    </div>
+    <div style="overflow-x: auto;">
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 30px;"></th>
+            <th>\u5206\u4EAB\u94FE\u63A5</th>
+            <th style="width: 80px;">\u5269\u4F59\u6B21\u6570</th>
+            <th style="width: 160px;">\u5230\u671F\u65F6\u95F4</th>
+            <th style="width: 70px;">\u5BC6\u7801\u52A0\u5BC6</th>
+            <th style="width: 60px;">\u64CD\u4F5C</th>
+          </tr>
+        </thead>
+        <tbody id="docTableBody">
+          <tr><td colspan="6" style="text-align:center;">\u52A0\u8F7D\u4E2D...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="notification" id="notification"></div>
+  <script>
+    ${commonFunctions}
+
+    const ADMIN_DELETE_PATH = '${Config.DeletePath}';
+
+    const showNotification = (msg) => {
+      const n = document.getElementById('notification');
+      n.textContent = msg;
+      n.style.display = 'block';
+      setTimeout(() => n.style.display = 'none', 2500);
+    };
+
+    let allDocs = [];
+
+    const formatExpiration = (ts) => new Date(ts).toLocaleString('zh-CN', { hour12: false });
+    const formatViews = (v) => v === -1 ? '\u65E0\u9650' : String(v);
+
+    const renderTable = (docs) => {
+      const tbody = document.getElementById('docTableBody');
+      document.getElementById('selectAll').checked = false;
+      if (!docs || docs.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">\u6682\u65E0\u6587\u6863</td></tr>';
+        document.getElementById('statusBar').textContent = '\u5171 0 \u4EFD\u6587\u6863';
+        return;
+      }
+      document.getElementById('statusBar').textContent = '\u5171 ' + docs.length + ' \u4EFD\u6587\u6863';
+      const rows = docs.map(function(doc) {
+        const safeUrl = doc.shareUrl.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+        const safeUrlForAttr = doc.shareUrl.replace(/'/g, "\\'");
+        return '<tr>' +
+          '<td style="text-align:center;"><input type="checkbox" class="doc-check" value="' + doc.docIdWithCrc + '"></td>' +
+          '<td><span class="share-link" onclick="copyShareLink(\'' + safeUrlForAttr + '\')" title="\u70B9\u51FB\u590D\u5236\u94FE\u63A5">' + safeUrl + '</span></td>' +
+          '<td style="text-align:center;">' + formatViews(doc.views) + '</td>' +
+          '<td>' + formatExpiration(doc.expiration) + '</td>' +
+          '<td style="text-align:center;">' + (doc.usePasswordEncryption ? '\u{1F512} \u662F' : '\u5426') + '</td>' +
+          '<td style="text-align:center;"><button class="danger" style="padding:3px 8px;font-size:12px;" onclick="deleteDoc(\'' + doc.docIdWithCrc + '\')">\u5220\u9664</button></td>' +
+          '</tr>';
+      });
+      tbody.innerHTML = rows.join('');
+    };
+
+    const loadDocs = async () => {
+      document.getElementById('statusBar').textContent = '\u52A0\u8F7D\u4E2D...';
+      try {
+        const resp = await fetch('/api/docs');
+        if (!resp.ok) throw new Error('\u8BF7\u6C42\u5931\u8D25: ' + resp.status);
+        allDocs = await resp.json();
+        renderTable(allDocs);
+      } catch (e) {
+        document.getElementById('docTableBody').innerHTML = '<tr><td colspan="6" style="text-align:center;color:#dc3545;">\u52A0\u8F7D\u5931\u8D25: ' + e.message + '</td></tr>';
+        document.getElementById('statusBar').textContent = '\u52A0\u8F7D\u5931\u8D25';
+      }
+    };
+
+    const copyShareLink = (url) => {
+      navigator.clipboard.writeText(url).then(() => showNotification('\u2705 \u94FE\u63A5\u5DF2\u590D\u5236\u5230\u526A\u8D34\u677F'));
+    };
+
+    const toggleSelectAll = (checked) => {
+      document.querySelectorAll('.doc-check').forEach(function(cb) { cb.checked = checked; });
+    };
+
+    const deleteDoc = async (docIdWithCrc) => {
+      if (!confirm('\u786E\u8BA4\u5220\u9664\u6B64\u6587\u6863\uFF1F')) return;
+      try {
+        const resp = await sendSignedRequest('/' + ADMIN_DELETE_PATH + '/' + docIdWithCrc, {});
+        const data = await resp.json();
+        if (data.success) {
+          showNotification('\u2705 \u6587\u6863\u5DF2\u5220\u9664');
+          await loadDocs();
+        } else {
+          showNotification('\u274C \u5220\u9664\u5931\u8D25: ' + (data.error || '\u672A\u77E5\u9519\u8BEF'));
+        }
+      } catch (e) {
+        showNotification('\u274C \u5220\u9664\u51FA\u9519: ' + e.message);
+      }
+    };
+
+    const deleteSelected = async () => {
+      const selected = Array.from(document.querySelectorAll('.doc-check:checked')).map(function(cb) { return cb.value; });
+      if (selected.length === 0) { showNotification('\u26A0\uFE0F \u8BF7\u5148\u9009\u62E9\u8981\u5220\u9664\u7684\u6587\u6863'); return; }
+      if (!confirm('\u786E\u8BA4\u5220\u9664\u9009\u4E2D\u7684 ' + selected.length + ' \u4EFD\u6587\u6863\uFF1F')) return;
+      let success = 0, fail = 0;
+      for (let i = 0; i < selected.length; i++) {
+        try {
+          const resp = await sendSignedRequest('/' + ADMIN_DELETE_PATH + '/' + selected[i], {});
+          const data = await resp.json();
+          if (data.success) success++; else fail++;
+        } catch (e) { fail++; }
+      }
+      showNotification('\u2705 \u5DF2\u5220\u9664 ' + success + ' \u4EFD' + (fail > 0 ? '\uFF0C' + fail + ' \u4EFD\u5931\u8D25' : ''));
+      await loadDocs();
+    };
+
+    loadDocs();
+    document.body.style.visibility = 'visible';
+  <\/script>
+</body>
+</html>`;
+}
+__name(getAdminPageHTML, "getAdminPageHTML");
+
 var jwksCache = null;
 var jwksCacheTime = 0;
 var JWKS_CACHE_TTL = 10 * 60 * 1e3;
@@ -1052,7 +1351,7 @@ __name(getHomePage, "getHomePage");
 async function handleRequest(request, env) {
   const url = new URL(request.url);
   const { pathname, hostname } = url;
-  const isWriteRequest = request.method === "POST" || (request.method === "GET" && pathname === "/");
+  const isWriteRequest = request.method === "POST" || (request.method === "GET" && (pathname === "/" || pathname === "/admin" || pathname === "/api/docs"));
   if (isWriteRequest && Config.WriteDomain) {
     if (hostname !== Config.WriteDomain) {
       return createHTMLResponse(`<!DOCTYPE html>
@@ -1178,6 +1477,12 @@ async function handleRequest(request, env) {
   }
   if (request.method === "GET" && pathname === "/") {
     return getHomePage();
+  }
+  if (request.method === "GET" && pathname === "/admin") {
+    return createHTMLResponse(getAdminPageHTML(request));
+  }
+  if (request.method === "GET" && pathname === "/api/docs") {
+    return await listDocuments(request, env);
   }
   return createRedirectResponse();
 }
