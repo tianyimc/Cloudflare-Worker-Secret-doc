@@ -433,6 +433,7 @@ var getDocPageFunctions = /* @__PURE__ */ __name((markdown, isError, remainingTi
 
     async function confirmDestruction() {
       if (${isError}) return;
+      if (!confirm('\u6B64\u4EFD\u6587\u6863\u5C06\u4F1A\u88AB\u9500\u6BC1\uFF0C\u4E0D\u518D\u652F\u6301\u67E5\u770B')) return;
       const response = await sendSignedRequest('/${Config.DeletePath}/${docId}', {});
       const data = await response.json();
       if (data.success) {
@@ -501,6 +502,7 @@ var getHomePageFunctions = /* @__PURE__ */ __name(() => `
       const views = document.getElementById('views').value;
       const expiration = document.getElementById('expiration').value;
       const password = document.getElementById('password').value;
+      const allowViewerDestroy = document.getElementById('allowViewerDestroy').value !== 'no';
       const submitButton = document.querySelector('button[onclick="createDocument()"]');
       
       if (!markdown || markdown.trim() === "") { alert('\u8BF7\u8F93\u5165\u6587\u6863\u5185\u5BB9'); return; }
@@ -521,7 +523,7 @@ var getHomePageFunctions = /* @__PURE__ */ __name(() => `
         }
         
         const response = await sendSignedRequest('/submit', {
-          views, expiration, usePasswordEncryption, markdown: encryptedContent
+          views, expiration, usePasswordEncryption, markdown: encryptedContent, allowViewerDestroy
         });
         
         const data = await response.json();
@@ -579,7 +581,7 @@ var getHomePageFunctions = /* @__PURE__ */ __name(() => `
     };
     updateCharCount();
   `, "getHomePageFunctions");
-var getDocPageContent = /* @__PURE__ */ __name((markdown, isError, remainingTime, remainingViews, docId, usePasswordEncryption) => `
+var getDocPageContent = /* @__PURE__ */ __name((markdown, isError, remainingTime, remainingViews, docId, usePasswordEncryption, allowViewerDestroy) => `
     <div class="doc-header" style="margin-bottom: 8px; margin-top: 40px;">
       <div class="doc-header-row" style="display: flex; align-items: center; gap: 8px;">
         <div class="info-block" style="flex: 1; display: flex; align-items: center; justify-content: space-between; background-color: var(--code-bg-color); border: 1px solid var(--border-color); border-radius: 4px; padding: 4px 8px; height: 32px; box-sizing: border-box;">
@@ -589,7 +591,7 @@ var getDocPageContent = /* @__PURE__ */ __name((markdown, isError, remainingTime
           </div>
           <div style="display: flex; gap: 6px;">
             <button ${isError ? 'disabled="disabled"' : ""} onclick="copyDocument()" style="background-color: #1E90FF; padding: 3px 8px; margin: 0; height: 24px; font-size: 12px;">\u590D\u5236\u6587\u6863</button>
-            <button ${isError ? 'disabled="disabled"' : ""} onclick="confirmDestruction()" style="background-color: #ff0000; padding: 3px 8px; margin: 0; height: 24px; font-size: 12px;">\u9500\u6BC1\u6587\u6863</button>
+            ${allowViewerDestroy ? `<button ${isError ? 'disabled="disabled"' : ""} onclick="confirmDestruction()" style="background-color: #ff0000; padding: 3px 8px; margin: 0; height: 24px; font-size: 12px;">\u9500\u6BC1\u6587\u6863</button>` : ""}
           </div>
         </div>
         
@@ -667,6 +669,16 @@ var getHomePageContent = /* @__PURE__ */ __name(() => `
         </div>
       </div>
 
+      <div style="margin-top: 8px; margin-bottom: 0; height: 38px; flex-shrink: 0;">
+        <div style="display: flex; align-items: center; gap: 6px; height: 100%;">
+          <label for="allowViewerDestroy" style="margin: 0; flex-shrink: 0; font-size: 14px; color: var(--text-color); line-height: 38px;">\u{1F6AB} \u5141\u8BB8\u8BBF\u95EE\u7AEF\u9500\u6BC1\uFF1A</label>
+          <select id="allowViewerDestroy" style="height: 32px; margin: 0; padding: 0 8px; border: 1px solid var(--border-color); border-radius: 4px; background-color: var(--bg-color); color: var(--text-color); font-size: 14px; box-sizing: border-box; width: auto;">
+            <option value="yes">\u662F\uFF08\u9ED8\u8BA4\uFF09</option>
+            <option value="no">\u5426</option>
+          </select>
+        </div>
+      </div>
+
       <div style="margin-top: 8px; height: 38px; flex-shrink: 0;">
         <button onclick="createDocument()" style="background-color: #1E90FF; width: 100%; height: 100%; font-size: 16px; font-weight: bold; margin: 0;">\u751F\u6210\u7AEF\u5230\u7AEF\u52A0\u5BC6\u94FE\u63A5 \u{1F517}</button>
       </div>
@@ -712,11 +724,11 @@ var getHomePageContent = /* @__PURE__ */ __name(() => `
       <p style="margin: 0;">\u79D8\u5BC6\u6587\u6863 - \u6781\u7B80\u3001\u5F00\u6E90\u7AEF\u5230\u7AEF\u52A0\u5BC6\u7684\u9605\u540E\u5373\u711A\u6587\u6863\u3002 | TIANYIMC<a href="https://github.com/tianyimc/Cloudflare-Worker-Secret-doc" target="_blank" rel="noopener noreferrer" style="color: var(--link-color); text-decoration: none;">\u57FA\u4E8E\u5F00\u6E90\u9879\u76EE</a> | v1.5.1.0 | <a href="/admin" style="color: var(--link-color); text-decoration: none;">\u{1F4CB} \u7BA1\u7406</a></p>
     </div>
   `, "getHomePageContent");
-function renderHTML(markdown = "", isDocPage = false, remainingViews = 0, isError = false, remainingTime = 0, docId = "", usePasswordEncryption = false) {
+function renderHTML(markdown = "", isDocPage = false, remainingViews = 0, isError = false, remainingTime = 0, docId = "", usePasswordEncryption = false, allowViewerDestroy = true) {
   const commonFunctions = getCommonFunctions();
   const docPageFunctions = getDocPageFunctions(markdown, isError, remainingTime, remainingViews, docId, usePasswordEncryption);
   const homePageFunctions = getHomePageFunctions();
-  const pageContent = isDocPage ? getDocPageContent(markdown, isError, remainingTime, remainingViews, docId, usePasswordEncryption) : getHomePageContent();
+  const pageContent = isDocPage ? getDocPageContent(markdown, isError, remainingTime, remainingViews, docId, usePasswordEncryption, allowViewerDestroy) : getHomePageContent();
   const pageFunctions = isDocPage ? docPageFunctions : homePageFunctions;
   return `<!DOCTYPE html>
 <html lang="zh">
@@ -936,7 +948,7 @@ async function createDocument(request, env) {
   if (new Blob([requestBody]).size > 100 * 1024) {
     return new Response("", { status: 204, headers: { "Content-Type": "text/plain; charset=UTF-8" } });
   }
-  const { markdown, views, expiration, usePasswordEncryption } = JSON.parse(requestBody);
+  const { markdown, views, expiration, usePasswordEncryption, allowViewerDestroy } = JSON.parse(requestBody);
   const errorMessage = validateInput(markdown, views, expiration);
   if (errorMessage) {
     return createJSONResponse({ error: errorMessage }, 400);
@@ -947,12 +959,12 @@ async function createDocument(request, env) {
     return createJSONResponse({ error: "\u65E0\u6548\u7684\u53C2\u6570\u503C" }, 400);
   }
   const docId = await generateDocId(Config.Shareid_control);
-  await env.Worker_Secret_doc.put(docId, JSON.stringify({ markdown, views: viewsInt, expiration: expirationMs, usePasswordEncryption }));
+  await env.Worker_Secret_doc.put(docId, JSON.stringify({ markdown, views: viewsInt, expiration: expirationMs, usePasswordEncryption, allowViewerDestroy: allowViewerDestroy !== false }));
   const link = `${new URL(request.url).origin}/${Config.SharePath}/${generateDocIdWithCrc(docId)}`;
   return createJSONResponse({ link });
 }
 __name(createDocument, "createDocument");
-async function getDocument(docIdWithCrc, env) {
+async function getDocument(docIdWithCrc, env, request) {
   const docId = validateAndExtractDocId(docIdWithCrc);
   if (!docId) return createRedirectResponse();
   const value = await env.Worker_Secret_doc.get(docId);
@@ -964,33 +976,71 @@ async function getDocument(docIdWithCrc, env) {
     await env.Worker_Secret_doc.delete(docId);
     return createHTMLResponse(renderHTML(ERROR_MESSAGES.INVALID_DATA, true, 0, true, 0, ""));
   }
+  const origin = new URL(request.url).origin;
+  const shareUrl = `${origin}/${Config.SharePath}/${docIdWithCrc}`;
   if (Date.now() > data.expiration) {
-    await env.Worker_Secret_doc.delete(docId);
+    await archiveDocument(docId, docIdWithCrc, shareUrl, data, "expired", env);
     return createHTMLResponse(renderHTML(ERROR_MESSAGES.NOT_FOUND, true, 0, true, 0, ""));
   }
   if (data.views !== 0 && data.views !== -1) {
     data.views -= 1;
     if (data.views <= 0) {
-      await env.Worker_Secret_doc.delete(docId);
+      await archiveDocument(docId, docIdWithCrc, shareUrl, data, "views_depleted", env);
     } else {
       await env.Worker_Secret_doc.put(docId, JSON.stringify(data));
     }
   }
   const remainingTime = Math.max(0, data.expiration - Date.now());
-  return createHTMLResponse(renderHTML(data.markdown, true, data.views, false, remainingTime, docIdWithCrc, data.usePasswordEncryption || false));
+  const allowViewerDestroy = data.allowViewerDestroy !== false;
+  return createHTMLResponse(renderHTML(data.markdown, true, data.views, false, remainingTime, docIdWithCrc, data.usePasswordEncryption || false, allowViewerDestroy));
 }
 __name(getDocument, "getDocument");
-async function deleteDocument(docIdWithCrc, env) {
+async function deleteDocument(docIdWithCrc, env, request) {
+  // Permanent purge of a history entry
+  if (docIdWithCrc.startsWith("hist:")) {
+    const innerDocIdWithCrc = docIdWithCrc.slice(5);
+    const docId = validateAndExtractDocId(innerDocIdWithCrc);
+    if (!docId) return createJSONResponse({ success: false, error: "Invalid document ID" });
+    await env.Worker_Secret_doc.delete(`hist:${docId}`);
+    return createJSONResponse({ success: true });
+  }
+  // Archive active doc → history
   const docId = validateAndExtractDocId(docIdWithCrc);
   if (!docId) return createJSONResponse({ success: false, error: "Invalid document ID" });
-  await env.Worker_Secret_doc.delete(docId);
+  const value = await env.Worker_Secret_doc.get(docId);
+  if (value) {
+    try {
+      const data = JSON.parse(value);
+      const origin = new URL(request.url).origin;
+      const shareUrl = `${origin}/${Config.SharePath}/${docIdWithCrc}`;
+      await archiveDocument(docId, docIdWithCrc, shareUrl, data, "manual", env);
+    } catch {
+      await env.Worker_Secret_doc.delete(docId);
+    }
+  }
   return createJSONResponse({ success: true });
 }
 __name(deleteDocument, "deleteDocument");
 
+async function archiveDocument(docId, docIdWithCrc, shareUrl, data, reason, env) {
+  const histData = {
+    docIdWithCrc,
+    shareUrl,
+    expiration: data.expiration,
+    views: data.views,
+    usePasswordEncryption: data.usePasswordEncryption || false,
+    reason,
+    destroyedAt: Date.now()
+  };
+  await env.Worker_Secret_doc.put(`hist:${docId}`, JSON.stringify(histData));
+  await env.Worker_Secret_doc.delete(docId);
+}
+__name(archiveDocument, "archiveDocument");
+
 async function listDocuments(request, env) {
   const origin = new URL(request.url).origin;
-  const docs = [];
+  const active = [];
+  const history = [];
   let cursor = void 0;
   const now = Date.now();
   do {
@@ -1000,9 +1050,11 @@ async function listDocuments(request, env) {
       if (!value) continue;
       try {
         const data = JSON.parse(value);
-        if (!isNaN(data.expiration) && data.expiration > now) {
+        if (key.name.startsWith("hist:")) {
+          history.push(data);
+        } else if (!isNaN(data.expiration) && data.expiration > now) {
           const docIdWithCrc = generateDocIdWithCrc(key.name);
-          docs.push({
+          active.push({
             docIdWithCrc,
             expiration: data.expiration,
             views: data.views,
@@ -1010,15 +1062,17 @@ async function listDocuments(request, env) {
             shareUrl: `${origin}/${Config.SharePath}/${docIdWithCrc}`
           });
         } else {
-          // Auto-clean expired or invalid entries encountered during listing
-          await env.Worker_Secret_doc.delete(key.name);
+          // Auto-archive expired or invalid entries encountered during listing
+          const docIdWithCrc = generateDocIdWithCrc(key.name);
+          const shareUrl = `${origin}/${Config.SharePath}/${docIdWithCrc}`;
+          await archiveDocument(key.name, docIdWithCrc, shareUrl, data, "expired", env);
         }
       } catch {
       }
     }
     cursor = listResult.list_complete ? void 0 : listResult.cursor;
   } while (cursor !== void 0);
-  return createJSONResponse(docs);
+  return createJSONResponse({ active, history });
 }
 __name(listDocuments, "listDocuments");
 
@@ -1073,6 +1127,7 @@ function getAdminPageHTML(request) {
       .admin-container { box-shadow: 0 0 10px rgba(255,255,255,0.1); }
     }
     h2 { color: var(--text-color); margin-top: 0; font-size: 18px; }
+    .section-title { font-size: 15px; font-weight: bold; margin: 20px 0 8px; padding-bottom: 6px; border-bottom: 2px solid var(--border-color); color: var(--text-color); }
     button {
       background-color: var(--link-color);
       color: #fff;
@@ -1086,6 +1141,7 @@ function getAdminPageHTML(request) {
     }
     button:hover { opacity: 0.8; }
     button.danger { background-color: #dc3545; }
+    button.secondary { background-color: #6c757d; }
     input[type="checkbox"] { width: auto; margin: 0; padding: 0; cursor: pointer; }
     table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
     th, td { border: 1px solid var(--border-color); padding: 8px 10px; text-align: left; }
@@ -1093,6 +1149,7 @@ function getAdminPageHTML(request) {
     tr:hover td { background-color: var(--code-bg-color); }
     .share-link { color: var(--link-color); cursor: pointer; word-break: break-all; font-size: 12px; }
     .share-link:hover { text-decoration: underline; }
+    .share-link-disabled { color: #999; word-break: break-all; font-size: 12px; cursor: default; }
     .theme-toggle {
       position: absolute;
       top: 12px;
@@ -1142,6 +1199,26 @@ function getAdminPageHTML(request) {
     .toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
     .toolbar label { font-size: 13px; cursor: pointer; margin: 0; }
     .status-bar { font-size: 12px; color: var(--text-color); opacity: 0.7; margin-left: auto; }
+    .confirm-overlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.5);
+      z-index: 2000;
+      justify-content: center;
+      align-items: center;
+    }
+    .confirm-box {
+      background: var(--bg-color);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 24px;
+      max-width: 420px;
+      width: 90%;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.3);
+    }
+    .confirm-box p { margin: 0 0 20px; font-size: 15px; line-height: 1.6; color: var(--text-color); }
+    .confirm-box-btns { display: flex; gap: 8px; justify-content: flex-end; }
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background-color: var(--bg-color); }
     ::-webkit-scrollbar-thumb { background-color: var(--border-color); border-radius: 3px; }
@@ -1160,11 +1237,13 @@ function getAdminPageHTML(request) {
       <label for="theme-toggle-checkbox"></label>
     </div>
     <h2>\u{1F4CB} \u6587\u6863\u7BA1\u7406</h2>
+
+    <div class="section-title">\u{1F4C4} \u6709\u6548\u6587\u6863</div>
     <div class="toolbar">
       <button onclick="loadDocs()">\u{1F504} \u5237\u65B0</button>
-      <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this.checked)">
-      <label for="selectAll">\u5168\u9009</label>
-      <button class="danger" onclick="deleteSelected()">\u{1F5D1}\uFE0F \u5220\u9664\u6240\u9009</button>
+      <input type="checkbox" id="selectAllActive" onchange="toggleSelectAll('active', this.checked)">
+      <label for="selectAllActive">\u5168\u9009</label>
+      <button class="danger" onclick="deleteSelectedActive()">\u{1F5D1}\uFE0F \u5220\u9664\u6240\u9009</button>
       <span class="status-bar" id="statusBar">\u52A0\u8F7D\u4E2D...</span>
     </div>
     <div style="overflow-x: auto;">
@@ -1179,12 +1258,49 @@ function getAdminPageHTML(request) {
             <th style="width: 60px;">\u64CD\u4F5C</th>
           </tr>
         </thead>
-        <tbody id="docTableBody">
+        <tbody id="activeTableBody">
+          <tr><td colspan="6" style="text-align:center;">\u52A0\u8F7D\u4E2D...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section-title">\u{1F4DC} \u5386\u53F2\u6587\u6863</div>
+    <div class="toolbar">
+      <input type="checkbox" id="selectAllHistory" onchange="toggleSelectAll('history', this.checked)">
+      <label for="selectAllHistory">\u5168\u9009</label>
+      <button class="danger" onclick="deleteSelectedHistory()">\u{1F5D1}\uFE0F \u6C38\u4E45\u5220\u9664</button>
+      <span class="status-bar" id="histStatusBar"></span>
+    </div>
+    <div style="overflow-x: auto;">
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 30px;"></th>
+            <th>\u5206\u4EAB\u94FE\u63A5</th>
+            <th style="width: 80px;">\u5269\u4F59\u6B21\u6570</th>
+            <th style="width: 160px;">\u5230\u671F\u65F6\u95F4</th>
+            <th style="width: 70px;">\u5BC6\u7801\u52A0\u5BC6</th>
+            <th style="width: 60px;">\u64CD\u4F5C</th>
+          </tr>
+        </thead>
+        <tbody id="historyTableBody">
           <tr><td colspan="6" style="text-align:center;">\u52A0\u8F7D\u4E2D...</td></tr>
         </tbody>
       </table>
     </div>
   </div>
+
+  <!-- Confirm Modal -->
+  <div class="confirm-overlay" id="confirmModal">
+    <div class="confirm-box">
+      <p id="confirmMsg"></p>
+      <div class="confirm-box-btns">
+        <button class="secondary" id="confirmCancelBtn">\u53D6\u6D88</button>
+        <button class="danger" id="confirmOkBtn">\u786E\u8BA4</button>
+      </div>
+    </div>
+  </div>
+
   <div class="notification" id="notification"></div>
   <div style="margin-top: 16px; text-align: center; font-size: 14px; color: var(--text-color); opacity: 0.8; padding-top: 10px; border-top: 1px solid var(--border-color);">
     <p style="margin: 0;">\u79D8\u5BC6\u6587\u6863 - \u6781\u7B80\u3001\u5F00\u6E90\u7AEF\u5230\u7AEF\u52A0\u5BC6\u7684\u9605\u540E\u5373\u711A\u6587\u6863\u3002 | TIANYIMC<a href="https://github.com/tianyimc/Cloudflare-Worker-Secret-doc" target="_blank" rel="noopener noreferrer" style="color: var(--link-color); text-decoration: none;">\u57FA\u4E8E\u5F00\u6E90\u9879\u76EE</a> | v1.5.1.0</p>
@@ -1201,33 +1317,71 @@ function getAdminPageHTML(request) {
       setTimeout(() => n.style.display = 'none', 2500);
     };
 
-    let allDocs = [];
+    const showConfirm = (message, onConfirm) => {
+      document.getElementById('confirmMsg').innerHTML = message;
+      const modal = document.getElementById('confirmModal');
+      modal.style.display = 'flex';
+      document.getElementById('confirmOkBtn').onclick = () => {
+        modal.style.display = 'none';
+        onConfirm();
+      };
+      document.getElementById('confirmCancelBtn').onclick = () => {
+        modal.style.display = 'none';
+      };
+    };
+
+    let allActiveDocs = [];
+    let allHistoryDocs = [];
 
     const formatExpiration = (ts) => new Date(ts).toLocaleString('zh-CN', { hour12: false });
     const formatViews = (v) => v === -1 ? '\u65E0\u9650' : String(v);
 
-    const renderTable = (docs) => {
-      const tbody = document.getElementById('docTableBody');
-      document.getElementById('selectAll').checked = false;
+    const renderActiveDocs = (docs) => {
+      const tbody = document.getElementById('activeTableBody');
+      document.getElementById('selectAllActive').checked = false;
       if (!docs || docs.length === 0) {
         tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">\u6682\u65E0\u6587\u6863</td></tr>';
-        document.getElementById('statusBar').textContent = '\u5171 0 \u4EFD\u6587\u6863';
+        document.getElementById('statusBar').textContent = '\u5171 0 \u4EFD\u6709\u6548\u6587\u6863';
         return;
       }
-      document.getElementById('statusBar').textContent = '\u5171 ' + docs.length + ' \u4EFD\u6587\u6863';
-      const rows = docs.map(function(doc) {
+      document.getElementById('statusBar').textContent = '\u5171 ' + docs.length + ' \u4EFD\u6709\u6548\u6587\u6863';
+      tbody.innerHTML = docs.map(function(doc) {
         const safeUrl = doc.shareUrl.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
         const safeUrlForAttr = doc.shareUrl.replace(/'/g, "\\\\'");
         return '<tr>' +
-          '<td style="text-align:center;"><input type="checkbox" class="doc-check" value="' + doc.docIdWithCrc + '"></td>' +
+          '<td style="text-align:center;"><input type="checkbox" class="active-check" value="' + doc.docIdWithCrc + '"></td>' +
           '<td><span class="share-link" onclick="copyShareLink(\\'' + safeUrlForAttr + '\\')" title="\u70B9\u51FB\u590D\u5236\u94FE\u63A5">' + safeUrl + '</span></td>' +
           '<td style="text-align:center;">' + formatViews(doc.views) + '</td>' +
           '<td>' + formatExpiration(doc.expiration) + '</td>' +
           '<td style="text-align:center;">' + (doc.usePasswordEncryption ? '\u{1F512} \u662F' : '\u5426') + '</td>' +
-          '<td style="text-align:center;"><button class="danger" style="padding:3px 8px;font-size:12px;" onclick="deleteDoc(\\'' + doc.docIdWithCrc + '\\')">\u5220\u9664</button></td>' +
+          '<td style="text-align:center;"><button class="danger" style="padding:3px 8px;font-size:12px;" onclick="archiveDoc(\\'' + doc.docIdWithCrc + '\\')">\u5220\u9664</button></td>' +
           '</tr>';
-      });
-      tbody.innerHTML = rows.join('');
+      }).join('');
+    };
+
+    const renderHistoryDocs = (docs) => {
+      const tbody = document.getElementById('historyTableBody');
+      document.getElementById('selectAllHistory').checked = false;
+      if (!docs || docs.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">\u6682\u65E0\u5386\u53F2\u6587\u6863</td></tr>';
+        document.getElementById('histStatusBar').textContent = '\u5171 0 \u6761\u5386\u53F2\u8BB0\u5F55';
+        return;
+      }
+      document.getElementById('histStatusBar').textContent = '\u5171 ' + docs.length + ' \u6761\u5386\u53F2\u8BB0\u5F55';
+      tbody.innerHTML = docs.map(function(doc) {
+        const safeUrl = doc.shareUrl.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+        const viewsHtml = doc.reason === 'manual'
+          ? '<span style="color:#dc3545;">\u4E3B\u52A8\u9500\u6BC1</span>'
+          : '<span style="color:#dc3545;">' + (doc.views === -1 ? '\u65E0\u9650' : String(doc.views)) + '</span>';
+        return '<tr>' +
+          '<td style="text-align:center;"><input type="checkbox" class="history-check" value="' + doc.docIdWithCrc + '"></td>' +
+          '<td><span class="share-link-disabled">' + safeUrl + '</span></td>' +
+          '<td style="text-align:center;">' + viewsHtml + '</td>' +
+          '<td style="color:#dc3545;">' + formatExpiration(doc.expiration) + '</td>' +
+          '<td style="text-align:center;">' + (doc.usePasswordEncryption ? '\u{1F512} \u662F' : '\u5426') + '</td>' +
+          '<td style="text-align:center;"><button class="danger" style="padding:3px 8px;font-size:12px;" onclick="purgeDoc(\\'' + doc.docIdWithCrc + '\\')">\u5220\u9664</button></td>' +
+          '</tr>';
+      }).join('');
     };
 
     const loadDocs = async () => {
@@ -1235,10 +1389,13 @@ function getAdminPageHTML(request) {
       try {
         const resp = await fetch('/api/docs');
         if (!resp.ok) throw new Error('\u8BF7\u6C42\u5931\u8D25: ' + resp.status);
-        allDocs = await resp.json();
-        renderTable(allDocs);
+        const result = await resp.json();
+        allActiveDocs = result.active || [];
+        allHistoryDocs = result.history || [];
+        renderActiveDocs(allActiveDocs);
+        renderHistoryDocs(allHistoryDocs);
       } catch (e) {
-        document.getElementById('docTableBody').innerHTML = '<tr><td colspan="6" style="text-align:center;color:#dc3545;">\u52A0\u8F7D\u5931\u8D25: ' + e.message + '</td></tr>';
+        document.getElementById('activeTableBody').innerHTML = '<tr><td colspan="6" style="text-align:center;color:#dc3545;">\u52A0\u8F7D\u5931\u8D25: ' + e.message + '</td></tr>';
         document.getElementById('statusBar').textContent = '\u52A0\u8F7D\u5931\u8D25';
       }
     };
@@ -1247,44 +1404,100 @@ function getAdminPageHTML(request) {
       navigator.clipboard.writeText(url).then(() => showNotification('\u2705 \u94FE\u63A5\u5DF2\u590D\u5236\u5230\u526A\u8D34\u677F'));
     };
 
-    const toggleSelectAll = (checked) => {
-      document.querySelectorAll('.doc-check').forEach(function(cb) { cb.checked = checked; });
+    const toggleSelectAll = (type, checked) => {
+      document.querySelectorAll('.' + type + '-check').forEach(function(cb) { cb.checked = checked; });
     };
 
-    const deleteDoc = async (docIdWithCrc) => {
-      if (!confirm('\u786E\u8BA4\u5220\u9664\u6B64\u6587\u6863\uFF1F')) return;
-      try {
-        const resp = await sendSignedRequest('/' + ADMIN_DELETE_PATH + '/' + docIdWithCrc, {});
-        const data = await resp.json();
-        if (data.success) {
-          showNotification('\u2705 \u6587\u6863\u5DF2\u5220\u9664');
-          await loadDocs();
-        } else {
-          showNotification('\u274C \u5220\u9664\u5931\u8D25: ' + (data.error || '\u672A\u77E5\u9519\u8BEF'));
+    // Archive single active doc (move to history)
+    const archiveDoc = (docIdWithCrc) => {
+      showConfirm(
+        '\u6B64\u4EFD\u6587\u6863\u5C06\u4F1A\u88AB\u7EB3\u5165\u5386\u53F2\u6587\u6863\uFF0C\u4E0D\u518D\u652F\u6301\u67E5\u770B',
+        async () => {
+          try {
+            const resp = await sendSignedRequest('/' + ADMIN_DELETE_PATH + '/' + docIdWithCrc, {});
+            const data = await resp.json();
+            if (data.success) {
+              showNotification('\u2705 \u5DF2\u5F52\u5165\u5386\u53F2');
+              await loadDocs();
+            } else {
+              showNotification('\u274C \u64CD\u4F5C\u5931\u8D25: ' + (data.error || '\u672A\u77E5\u9519\u8BEF'));
+            }
+          } catch (e) {
+            showNotification('\u274C \u64CD\u4F5C\u51FA\u9519: ' + e.message);
+          }
         }
-      } catch (e) {
-        showNotification('\u274C \u5220\u9664\u51FA\u9519: ' + e.message);
-      }
+      );
     };
 
-    const deleteSelected = async () => {
-      const selected = Array.from(document.querySelectorAll('.doc-check:checked')).map(function(cb) { return cb.value; });
-      if (selected.length === 0) { showNotification('\u26A0\uFE0F \u8BF7\u5148\u9009\u62E9\u8981\u5220\u9664\u7684\u6587\u6863'); return; }
-      if (!confirm('\u786E\u8BA4\u5220\u9664\u9009\u4E2D\u7684 ' + selected.length + ' \u4EFD\u6587\u6863\uFF1F')) return;
-      let success = 0, fail = 0;
-      for (let i = 0; i < selected.length; i++) {
-        try {
-          const resp = await sendSignedRequest('/' + ADMIN_DELETE_PATH + '/' + selected[i], {});
-          const data = await resp.json();
-          if (data.success) success++; else fail++;
-        } catch (e) { fail++; }
-      }
-      showNotification('\u2705 \u5DF2\u5220\u9664 ' + success + ' \u4EFD' + (fail > 0 ? '\uFF0C' + fail + ' \u4EFD\u5931\u8D25' : ''));
+    // Permanently purge a history entry
+    const purgeDoc = (docIdWithCrc) => {
+      showConfirm(
+        '\u6B64\u6761\u8BB0\u5F55\u5C06\u88AB\u6C38\u4E45\u6292\u9664',
+        async () => {
+          try {
+            const resp = await sendSignedRequest('/' + ADMIN_DELETE_PATH + '/hist:' + docIdWithCrc, {});
+            const data = await resp.json();
+            if (data.success) {
+              showNotification('\u2705 \u8BB0\u5F55\u5DF2\u6C38\u4E45\u5220\u9664');
+              await loadDocs();
+            } else {
+              showNotification('\u274C \u64CD\u4F5C\u5931\u8D25: ' + (data.error || '\u672A\u77E5\u9519\u8BEF'));
+            }
+          } catch (e) {
+            showNotification('\u274C \u64CD\u4F5C\u51FA\u9519: ' + e.message);
+          }
+        }
+      );
+    };
+
+    // Archive selected active docs
+    const deleteSelectedActive = () => {
+      const selected = Array.from(document.querySelectorAll('.active-check:checked')).map(function(cb) { return cb.value; });
+      if (selected.length === 0) { showNotification('\u26A0\uFE0F \u8BF7\u5148\u9009\u62E9\u8981\u64CD\u4F5C\u7684\u6587\u6863'); return; }
+      const n = selected.length;
+      showConfirm(
+        '\u9009\u4E2D\u7684<strong style="color:#dc3545;">' + n + '</strong>\u4EFD\u6587\u6863\u5C06\u4F1A\u88AB\u7EB3\u5165\u5386\u53F2\u6587\u6863\uFF0C\u4E0D\u518D\u652F\u6301\u67E5\u770B',
+        async () => {
+          let success = 0, fail = 0;
+          for (let i = 0; i < selected.length; i++) {
+            try {
+              const resp = await sendSignedRequest('/' + ADMIN_DELETE_PATH + '/' + selected[i], {});
+              const data = await resp.json();
+              if (data.success) success++; else fail++;
+            } catch (e) { fail++; }
+          }
+          showNotification('\u2705 \u5DF2\u5F52\u5165\u5386\u53F2 ' + success + ' \u4EFD' + (fail > 0 ? '\uFF0C' + fail + ' \u4EFD\u5931\u8D25' : ''));
+          await loadDocs();
+        }
+      );
+    };
+
+    // Permanently purge selected history entries
+    const deleteSelectedHistory = () => {
+      const selected = Array.from(document.querySelectorAll('.history-check:checked')).map(function(cb) { return cb.value; });
+      if (selected.length === 0) { showNotification('\u26A0\uFE0F \u8BF7\u5148\u9009\u62E9\u8981\u64CD\u4F5C\u7684\u8BB0\u5F55'); return; }
+      const n = selected.length;
+      showConfirm(
+        '\u9009\u4E2D\u7684<strong style="color:#dc3545;">' + n + '</strong>\u6761\u8BB0\u5F55\u5C06\u88AB\u6C38\u4E45\u6292\u9664',
+        async () => {
+          let success = 0, fail = 0;
+          for (let i = 0; i < selected.length; i++) {
+            try {
+              const resp = await sendSignedRequest('/' + ADMIN_DELETE_PATH + '/hist:' + selected[i], {});
+              const data = await resp.json();
+              if (data.success) success++; else fail++;
+            } catch (e) { fail++; }
+          }
+          showNotification('\u2705 \u5DF2\u6C38\u4E45\u5220\u9664 ' + success + ' \u6761' + (fail > 0 ? '\uFF0C' + fail + ' \u6761\u5931\u8D25' : ''));
+          await loadDocs();
+        }
+      );
+    };
+
+    window.addEventListener('DOMContentLoaded', async () => {
       await loadDocs();
-    };
-
-    loadDocs();
-    document.body.style.visibility = 'visible';
+      document.body.style.visibility = 'visible';
+    });
   <\/script>
 </body>
 </html>`;
@@ -1472,12 +1685,12 @@ async function handleRequest(request, env) {
     }
     if (pathname === "/submit") return await createDocument(request, env);
     if (pathname.startsWith(`/${Config.DeletePath}/`)) {
-      return await deleteDocument(pathname.replace(`/${Config.DeletePath}/`, ""), env);
+      return await deleteDocument(pathname.replace(`/${Config.DeletePath}/`, ""), env, request);
     }
     return createForbiddenResponse();
   }
   if (request.method === "GET" && pathname.startsWith(`/${Config.SharePath}/`)) {
-    return await getDocument(pathname.replace(`/${Config.SharePath}/`, ""), env);
+    return await getDocument(pathname.replace(`/${Config.SharePath}/`, ""), env, request);
   }
   if (request.method === "GET" && pathname === "/") {
     return getHomePage();
