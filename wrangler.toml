@@ -1,0 +1,36 @@
+# Cloudflare Worker Secret doc — wrangler configuration template
+# Copy this file, fill in the placeholder values, and run `wrangler deploy`.
+
+name = "cloudflare-worker-secret-doc"
+main = "Cloudflare Worker Secret doc.js"
+compatibility_date = "2024-09-23"
+
+# ── KV binding ──────────────────────────────────────────────────────────────
+# Create a KV namespace in the Cloudflare dashboard and paste its ID below.
+[[kv_namespaces]]
+binding = "Worker_Secret_doc"
+id = "YOUR_KV_NAMESPACE_ID"
+
+# ── R2 bucket binding ───────────────────────────────────────────────────────
+# Create an R2 bucket in the Cloudflare dashboard and paste its name below.
+[[r2_buckets]]
+binding = "Secret_doc_R2"
+bucket_name = "YOUR_R2_BUCKET_NAME"
+
+# ── Routes ──────────────────────────────────────────────────────────────────
+# Map two custom domains to this worker:
+#   • write domain  — protected by Cloudflare Zero Trust Access
+#   • read  domain  — public (no authentication required)
+#
+# Replace the placeholder hostnames with your real domains.
+# Both domains must already be proxied (orange-cloud) through Cloudflare.
+
+[[routes]]
+# Write domain: create / delete documents  (protected by CF Zero Trust)
+pattern = "write.yourdomain.com/*"
+zone_name = "yourdomain.com"
+
+[[routes]]
+# Read domain: view shared documents  (public)
+pattern = "read.yourdomain.com/*"
+zone_name = "yourdomain.com"
